@@ -1,0 +1,11 @@
+---
+name: tools
+summary: omo-recommend-models development tools
+description: |
+  Project-local SDK that exposes service tunnels for opencode acp
+version: "0.1"
+
+slots:
+  opencode-bridge:
+    interface: tunnel
+    endpoint: localhost:3000/tcp

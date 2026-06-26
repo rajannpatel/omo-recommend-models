@@ -1,0 +1,60 @@
+---
+name: omo-recommend-models
+base: ubuntu@26.04
+
+sdks:
+  - name: opencode
+    channel: latest/stable
+    slots:
+      opencode-bridge:
+        interface: tunnel
+        endpoint: localhost:3000/tcp
+  - name: uv
+    channel: latest/stable
+  - name: project-tools
+  - name: agy
+    channel: latest/stable
+  - name: codex
+    channel: latest/stable
+  - name: ollama
+    channel: cuda/stable
+  - name: node
+    channel: latest/stable
+  - name: system
+    plugs:
+      opencode-bridge:
+        interface: tunnel
+        endpoint: localhost:3000/tcp
+
+connections:
+  - plug: opencode:opencode-config
+    slot: :mount
+
+  context: |
+    set -euo pipefail
+    echo "==> Repository"
+    git status --short
+    echo
+    echo "==> Snap metadata"
+    yq '.name, .base, .confinement, (.apps | keys)' snap/snapcraft.yaml
+    echo
+    echo "==> Useful actions"
+    yq -r '.actions | keys | .[]' workshop.yaml
+
+  shell: |
+    set -euo pipefail
+    if [ "$#" -gt 0 ]; then
+      exec "$@"
+    fi
+
+    export PS1="(workshop:snap-pi-hole) \w \$ "
+    echo "Workshop shell for omo-recommend-models"
+    echo "Project commands run here inside the Workshop LXD container."
+    exec bash --noprofile --norc -i
+
+  ultrawork: opencode --prompt "$@" ulw
+
+  codex-yolo: codex --yolo "$@"
+  agy-run: agy agent run "$@"
+
+  ollama-serve: ollama serve

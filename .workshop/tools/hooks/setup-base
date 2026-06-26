@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y \
+  curl \
+  fd-find \
+  file \
+  gawk \
+  gh \
+  git \
+  jq \
+  ripgrep \
+  ruby \
+  sed \
+  shellcheck \
+  snapd \
+  tree \
+  yamllint \
+  wget \
+  yq

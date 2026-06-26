@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /project
+
+npx oh-my-openagent install
+
+opencode plugin opencode-acp -g
+opencode plugin @ramtinj95/opencode-tokenscope -g
+mkdir -p ~/.config/opencode/command
+cat > ~/.config/opencode/command/tokenscope.md << 'EOF'
