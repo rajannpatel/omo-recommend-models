@@ -918,9 +918,9 @@ function callPanelModelAsync(model, prompt, signal, statusRef) {
         return resolve(null);
       }
 
-      // Detect quota / billing errors from stderr or exit code
+      // Detect quota / billing errors from stdout/stderr or exit code
       if (statusRef) {
-        const lower = stderr ? stderr.toLowerCase() : "";
+        const lower = (stderr + "\n" + stdout).toLowerCase();
         if (
           code === 402 ||
           lower.includes("402") ||
@@ -939,19 +939,19 @@ function callPanelModelAsync(model, prompt, signal, statusRef) {
         ) {
           statusRef.quotaExceeded = true;
           if (!statusRef.failReason) statusRef.failReason = "quota-exceeded";
-          statusRef.stderr = compactErrorText(stderr);
+          statusRef.stderr = compactErrorText(stderr || stdout);
         }
       }
 
-      // Detect rate limiting from stderr text
-      if (statusRef && stderr) {
-        const lower = stderr.toLowerCase();
+      // Detect rate limiting from stdout/stderr text
+      if (statusRef) {
+        const lower = (stderr + "\n" + stdout).toLowerCase();
         if (lower.includes("429") || lower.includes("rate limit") || lower.includes("too many requests")) {
           statusRef.rateLimited = true;
-          const raMatch = stderr.match(/retry-after[:\s]*(\d+)/i);
+          const raMatch = (stderr + "\n" + stdout).match(/retry-after[:\s]*(\d+)/i);
           if (raMatch) statusRef.retryAfter = parseInt(raMatch[1], 10);
           if (!statusRef.failReason) statusRef.failReason = "rate-limited";
-          statusRef.stderr = compactErrorText(stderr);
+          statusRef.stderr = compactErrorText(stderr || stdout);
         }
       }
 

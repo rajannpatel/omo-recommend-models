@@ -104,6 +104,10 @@ if (args[0] === "models") {
     process.stderr.write("Error: billing quota exceeded (HTTP 402)" + NL);
     process.exit(1);
   }
+  if (model && model.includes("stdout-quota")) {
+    process.stdout.write("Payment Required: {\\\"error\\\": \\\"quota exceeded\\\"}" + NL);
+    process.exit(1);
+  }
   function emitText(text) {
     process.stdout.write(JSON.stringify({ type: "text", part: { text } }) + NL);
   }
@@ -644,4 +648,39 @@ test("quota exceeded errors block recommendations for that provider", async (t) 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
   assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+});
+
+test("quota exceeded errors in stdout block recommendations for that provider", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "stdout-quota-prov": [{ id: "model-1", family: "model-family" }],
+        "good-prov": [{ id: "model-2", family: "model-family" }]
+      }
+    },
+    aiResponse: {
+      analysis: "quota test",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "stdout-quota-prov", model: "model-1", reason: "quota model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["-y", "--cloud-only", "--model", "stdout-quota-prov/model-1"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+
+  const configText = fs.readFileSync(harness.configPath, "utf8");
+  const configJson = JSON.parse(configText);
+  assert.notEqual(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
 });
