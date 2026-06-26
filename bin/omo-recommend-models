@@ -25,7 +25,7 @@ const {
   CONFIG_PATH, BACKUP_PATH,
   confirm, promptUser, pickFreeModel, discoverFreeModels, callOpencodeChat, parseAiJson,
   loadConfig, loadProviderModels,
-  buildProviderAliases, resolveProvider, buildRichModelLookup,
+  buildProviderAliases, resolveProvider, normalizeLocalModelName, formatModelRef, buildRichModelLookup,
 } = require("../lib/omo-shared");
 
 // =========================================================================
@@ -234,13 +234,6 @@ function createProgress(label) {
   };
 }
 
-function normalizeLocalModelName(modelName) {
-  const trimmed = String(modelName || "").trim();
-  const withoutProvider = trimmed.replace(/^(?:local|ollama)\//, "");
-  if (!withoutProvider) return "";
-  return withoutProvider.includes(":") ? withoutProvider : `${withoutProvider}:latest`;
-}
-
 function usableLocalVramGb(gpu) {
   const gpuVram = Number(gpu?.vramGb);
   if (!gpu?.hasGpu || !Number.isFinite(gpuVram)) return 0;
@@ -372,7 +365,7 @@ function normalizeRecommendation(rec) {
 }
 
 function modelRef(provider, modelName) {
-  return `${provider}/${provider === LOCAL_PROVIDER ? normalizeLocalModelName(modelName) : modelName}`;
+  return formatModelRef(provider, modelName);
 }
 
 function allConfigEntries(config) {
