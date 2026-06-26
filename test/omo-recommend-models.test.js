@@ -100,6 +100,10 @@ if (args[0] === "models") {
 } else if (args[0] === "run") {
   const model = args[args.indexOf("--model") + 1];
   const pure = args.includes("--pure");
+  if (model && model.includes("quota-exceeded")) {
+    process.stderr.write("Error: billing quota exceeded (HTTP 402)" + NL);
+    process.exit(1);
+  }
   function emitText(text) {
     process.stdout.write(JSON.stringify({ type: "text", part: { text } }) + NL);
   }
@@ -605,4 +609,39 @@ test("validator rollback integration uses sibling validator and restores config"
   assert.match(rebalanceResult.stderr, /categories\.bad\.routing\.0|Command failed/);
   assert.doesNotMatch(rebalanceResult.stderr, /forced validator failure/);
   assert.equal(fs.readFileSync(rebalance.configPath, "utf8"), rebalanceOriginal);
+});
+
+test("quota exceeded errors block recommendations for that provider", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "quota-exceeded-prov": [{ id: "model-1", family: "model-family" }],
+        "good-prov": [{ id: "model-2", family: "model-family" }]
+      }
+    },
+    aiResponse: {
+      analysis: "quota test",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "quota-exceeded-prov", model: "model-1", reason: "quota model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["-y", "--cloud-only", "--model", "quota-exceeded-prov/model-1"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+
+  const configText = fs.readFileSync(harness.configPath, "utf8");
+  const configJson = JSON.parse(configText);
+  assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
 });
