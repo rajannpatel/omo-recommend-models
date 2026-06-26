@@ -421,7 +421,7 @@ function registryModelSizeGb(name, tag) {
 function loadCachedModels() {
   try {
     if (fs.existsSync(MODEL_CACHE_FILE)) return JSON.parse(fs.readFileSync(MODEL_CACHE_FILE, "utf-8"));
-  } catch (_) {}
+  } catch (_) { }
   return null;
 }
 
@@ -430,7 +430,7 @@ function saveCachedModels(models) {
     const dir = path.dirname(MODEL_CACHE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(MODEL_CACHE_FILE, JSON.stringify(models, null, 2), "utf-8");
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function discoverModels(forceRefresh = false, progress = null) {
@@ -478,11 +478,11 @@ function detectGPU() {
     const [name, memStr] = out.trim().split(", ");
     const memGB = Math.round(parseInt(memStr) / 1024);
     return { hasGpu: true, name: name.trim(), label: `${name.trim()} (${memGB} GB VRAM)`, vramGb: memGB };
-  } catch (_) {}
+  } catch (_) { }
   try {
     const out = execSync("ollama list 2>/dev/null", { encoding: "utf-8", timeout: 5000, env: dumbEnv });
     if (out.includes("NAME")) return { hasGpu: true, name: "unknown GPU", label: "GPU detected (no nvidia-smi)", vramGb: 8 };
-  } catch (_) {}
+  } catch (_) { }
   return { hasGpu: false, name: "", label: "No GPU detected", vramGb: 0 };
 }
 
@@ -494,9 +494,9 @@ function detectOllama() {
       encoding: "utf-8", timeout: 3000, env: dumbEnv,
     });
     installed = bin.trim().length > 0;
-  } catch (_) {}
+  } catch (_) { }
   if (installed) {
-    try { version = (execSync("ollama --version 2>/dev/null", { encoding: "utf-8", timeout: 3000, env: dumbEnv }) || "").trim(); } catch (_) {}
+    try { version = (execSync("ollama --version 2>/dev/null", { encoding: "utf-8", timeout: 3000, env: dumbEnv }) || "").trim(); } catch (_) { }
     try {
       const list = execSync("ollama list 2>/dev/null", { encoding: "utf-8", timeout: 5000, env: dumbEnv });
       running = list.includes("NAME");
@@ -510,7 +510,7 @@ function detectOllama() {
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   return { installed, running, version, models };
 }
@@ -786,7 +786,7 @@ function discoverCliModels() {
               });
               const jsonMatch = raw.match(/\{[\s\S]*\}/);
               if (jsonMatch) return JSON.parse(jsonMatch[0]);
-            } catch {}
+            } catch { }
             return null;
           },
         });
@@ -809,16 +809,16 @@ function discoverCliModels() {
 // AI Panel — multi-model consensus & debate
 // =========================================================================
 const PANEL_MODEL_TIMEOUT_SECONDS = Math.max(
-   120,
-   Number.parseInt(process.env.OMO_PANEL_MODEL_TIMEOUT_SECONDS || "180", 10) || 180,
+  120,
+  Number.parseInt(process.env.OMO_PANEL_MODEL_TIMEOUT_SECONDS || "180", 10) || 180,
 );
 
 const PANEL_FIRST_BYTE_TIMEOUT_SECONDS = Math.max(
-   60,
-   Number.parseInt(
-     process.env.OMO_PANEL_FIRST_BYTE_TIMEOUT_SECONDS || String(PANEL_MODEL_TIMEOUT_SECONDS),
-     10,
-   ) || PANEL_MODEL_TIMEOUT_SECONDS,
+  60,
+  Number.parseInt(
+    process.env.OMO_PANEL_FIRST_BYTE_TIMEOUT_SECONDS || String(PANEL_MODEL_TIMEOUT_SECONDS),
+    10,
+  ) || PANEL_MODEL_TIMEOUT_SECONDS,
 );
 
 function killChild(child) {
@@ -846,7 +846,7 @@ function extractOpencodeText(stdout) {
       if (evt.type === "text" && evt.part && evt.part.text) {
         texts.push(evt.part.text);
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   return texts.join("") || null;
 }
@@ -1007,11 +1007,11 @@ async function callModelForAgent(model, prompt, signal, statusRef, maxRetries = 
     if (raw) {
       // Got a response — parse and return
       let parsed = null;
-      try { parsed = parseAiJson(raw); } catch (_) {}
+      try { parsed = parseAiJson(raw); } catch (_) { }
       if (!parsed || !parsed.name || !parsed.model || !parsed.model.provider) {
         const cleaned = await cleanAiResponse(raw);
         if (cleaned) {
-          try { parsed = parseAiJson(cleaned); } catch (_) {}
+          try { parsed = parseAiJson(cleaned); } catch (_) { }
         }
       }
       if (!parsed) return null;
@@ -2052,7 +2052,7 @@ async function main() {
       console.log(`\nCached panel result:`);
       if (cachedModelList.length > 0) {
         const stripped = cachedModelList.map((m) => m.startsWith("opencode/") ? m.slice(9) : m);
-        console.log(`  \u2022 Surveyed opencode models: ${stripped.join(", ")}`);
+        console.log(`  \u2022 Surveyed AI models: ${stripped.join(", ")}`);
       }
       if (cached.gpu && cached.gpu.label) {
         const gpuLine = `  \u2022 Hardware: ${cached.gpu.label}`;
