@@ -45,6 +45,7 @@ const VARIANT_BONUS = { xhigh: 10, max: 8, high: 5, medium: 0, low: -5 };
 const LOCAL_PROVIDER = "local";
 const FREE_PROVIDERS = ["opencode", LOCAL_PROVIDER];
 const QUALITY_TIERS = ["reasoning", "balanced", "fast"];
+const quotaExceededProviders = new Set();
 
 // =========================================================================
 // Local model constants (from omo-recommend-local)
@@ -917,6 +918,31 @@ function callPanelModelAsync(model, prompt, signal, statusRef) {
         return resolve(null);
       }
 
+      // Detect quota / billing errors from stderr or exit code
+      if (statusRef) {
+        const lower = stderr ? stderr.toLowerCase() : "";
+        if (
+          code === 402 ||
+          lower.includes("402") ||
+          lower.includes("payment required") ||
+          lower.includes("payment_required") ||
+          lower.includes("quota exceeded") ||
+          lower.includes("quota_exceeded") ||
+          lower.includes("billing limit") ||
+          lower.includes("billing_limit") ||
+          lower.includes("credit limit") ||
+          lower.includes("credit_limit") ||
+          lower.includes("insufficient funds") ||
+          lower.includes("insufficient_funds") ||
+          lower.includes("usage limit") ||
+          lower.includes("budget exceeded")
+        ) {
+          statusRef.quotaExceeded = true;
+          if (!statusRef.failReason) statusRef.failReason = "quota-exceeded";
+          statusRef.stderr = compactErrorText(stderr);
+        }
+      }
+
       // Detect rate limiting from stderr text
       if (statusRef && stderr) {
         const lower = stderr.toLowerCase();
@@ -1002,6 +1028,15 @@ async function callModelForAgent(model, prompt, signal, statusRef, maxRetries = 
     return null;
   }
 
+  const provider = model.split("/")[0];
+  if (quotaExceededProviders.has(provider)) {
+    if (statusRef) {
+      statusRef.failReason = "quota-exceeded";
+      statusRef.stderr = "Skipped: provider quota exceeded";
+    }
+    return null;
+  }
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const raw = await callPanelModelAsync(model, prompt, signal, statusRef);
     if (raw) {
@@ -1018,6 +1053,11 @@ async function callModelForAgent(model, prompt, signal, statusRef, maxRetries = 
       const rec = normalizeAgentRec(parsed);
       if (!rec || !rec.name || !rec.model || !rec.model.provider) return null;
       return rec;
+    }
+
+    if (statusRef?.quotaExceeded) {
+      quotaExceededProviders.add(provider);
+      return null;
     }
 
     // Non-rate-limit failure — don't retry
@@ -1330,19 +1370,19 @@ async function runPanelAndSelect(config, cloudLookup, allLocalModels, gpu, ollam
     const routingVotes = {};
     const fbVotes = {};
     for (const { recommendation: rec } of validResults) {
-      if (rec.model && rec.model.provider && rec.model.model) {
+      if (rec.model && rec.model.provider && rec.model.model && !quotaExceededProviders.has(rec.model.provider)) {
         const key = `${rec.model.provider}/${rec.model.model}`;
         modelVotes[key] = (modelVotes[key] || 0) + 1;
         if (rec.model.reason) modelReasons[key] = rec.model.reason;
       }
       for (const r of rec.routing || []) {
-        if (r.provider && r.model) {
+        if (r.provider && r.model && !quotaExceededProviders.has(r.provider)) {
           const key = `${r.provider}/${r.model}`;
           routingVotes[key] = (routingVotes[key] || 0) + 1;
         }
       }
       for (const r of rec.fallback_models || []) {
-        if (r.provider && r.model) {
+        if (r.provider && r.model && !quotaExceededProviders.has(r.provider)) {
           const key = `${r.provider}/${r.model}`;
           fbVotes[key] = (fbVotes[key] || 0) + 1;
         }
@@ -1498,17 +1538,20 @@ function completeAiRecommendations(aiResult, config, cloudLookup, allLocalModels
     if (!rec || !rec.name) continue;
     const norm = rec.model || rec.recommendations ? normalizeAgentRec({ ...rec }) : rec;
     norm.model = normalizeLocalRecommendation(norm.model, fittingByName, true);
+    if (norm.model && quotaExceededProviders.has(norm.model.provider)) {
+      norm.model = null;
+    }
     norm.routing = (norm.routing || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, false))
-      .filter(Boolean);
+      .filter((r) => r && !quotaExceededProviders.has(r.provider));
     norm.fallback_models = (norm.fallback_models || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
-      .filter(Boolean);
+      .filter((r) => r && !quotaExceededProviders.has(r.provider));
     recByName.set(norm.name, norm);
   }
 
   const cloudProviders = Object.entries(cloudLookup.byId || {})
-    .filter(([provider, modelMap]) => provider !== LOCAL_PROVIDER && modelMap && modelMap.size > 0);
+    .filter(([provider, modelMap]) => provider !== LOCAL_PROVIDER && modelMap && modelMap.size > 0 && !quotaExceededProviders.has(provider));
 
   for (const entry of entries) {
     let rec = recByName.get(entry.name);
@@ -1525,12 +1568,15 @@ function completeAiRecommendations(aiResult, config, cloudLookup, allLocalModels
     rec.type = rec.type || entry.type;
     rec.profile = rec.profile || entry.section.description || entry.section.model_quality || "";
     rec.model = normalizeLocalRecommendation(rec.model, fittingByName, true);
+    if (rec.model && quotaExceededProviders.has(rec.model.provider)) {
+      rec.model = null;
+    }
     rec.routing = (rec.routing || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, false))
-      .filter(Boolean);
+      .filter((r) => r && !quotaExceededProviders.has(r.provider));
     rec.fallback_models = (rec.fallback_models || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
-      .filter(Boolean);
+      .filter((r) => r && !quotaExceededProviders.has(r.provider));
 
     // Collect present providers across model + routing + fallback_models
     const presentProviders = new Set();
