@@ -684,3 +684,30 @@ test("quota exceeded errors in stdout block recommendations for that provider", 
   const configJson = JSON.parse(configText);
   assert.notEqual(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
 });
+
+test("recommendation preview displays prevModel when newModel is null", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
+    aiResponse: {
+      analysis: "no model change recommendation",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: null,
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, "\nn\n", ["--cloud-only"]);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /model: opencode\/big-pickle/);
+});
+
