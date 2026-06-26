@@ -7,3 +7,4 @@ test_prompt.yaml
 visual-engineering-recommendation.json
 *.log
 .tmp/
+.workshop.lock
