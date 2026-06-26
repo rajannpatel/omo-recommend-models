@@ -1,0 +1,4 @@
+COMMAND: node --check lib/omo-shared.js && node --check bin/omo-validate-config && node --check bin/omo-recommend-models
+--- output ---
+
+EXIT_CODE:0

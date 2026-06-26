@@ -1,0 +1,12 @@
+COMMAND: NODE_PATH=$PWD node ./bin/omo-validate-config --config /tmp/omo-validator-qa-eA5wM5/invalid.jsonc
+--- invalid fixture ---
+{
+  "$schema": "https://example.invalid/schema.json",
+  "agents": { "sisyphus": { "model": "missing-slash" } },
+  "categories": {}
+}
+
+--- output ---
+agents.sisyphus.model: must use provider/model syntax
+
+EXIT_CODE:1

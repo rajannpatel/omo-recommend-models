@@ -1,0 +1,9 @@
+node_modules/
+.omo/run-continuation/
+.omo/boulder.json
+.omo/start-work/
+bin/*.json
+test_prompt.yaml
+visual-engineering-recommendation.json
+*.log
+.tmp/

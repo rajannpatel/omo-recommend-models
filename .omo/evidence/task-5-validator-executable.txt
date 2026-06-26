@@ -1,0 +1,2 @@
+COMMAND: test -x bin/omo-validate-config
+EXIT_CODE:0

@@ -1,0 +1,19 @@
+COMMAND: NODE_PATH=$PWD node ./bin/omo-validate-config --config /tmp/omo-validator-qa-eA5wM5/valid.jsonc
+--- valid fixture ---
+{
+  // URL string intentionally contains // and must not be stripped.
+  "$schema": "https://example.invalid/schema//with-slashes.json",
+  "agents": {
+    "sisyphus": {
+      "description": "keeps // inside strings",
+      "model": "opencode/big-pickle",
+      "fallback_models": ["opencode/north-mini-code-free",],
+    },
+  },
+  "categories": {},
+}
+
+--- output ---
+Config valid: /tmp/omo-validator-qa-eA5wM5/valid.jsonc
+
+EXIT_CODE:0

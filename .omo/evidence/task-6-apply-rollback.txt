@@ -1,0 +1,39 @@
+EXIT CODE: 1
+STDOUT:
+  ⏳ Checking GPU...  ✓ Checking GPU: No GPU detected (0s)[K
+  ⏳ Checking Ollama...  ✓ Checking Ollama: not installed (0s)[K
+  ⏳ Discovering local model catalog...  • Discovering local model catalog: skipped by --cloud-only[K
+  ⏳ Loading cloud provider cache...  ✓ Loading cloud provider cache: 1 provider(s) (0s)[K
+  ✓ Model picture: 1 cloud provider(s), 0 installed local model(s)
+
+  ✓ Using 1 explicitly selected model(s): opencode/big-pickle
+
+== AI Panel: 1 agents, 1 panel models ==
+   Models: big-pickle
+[2K   tasks: 0/1  agents: 0/1[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus[2K   tasks: 1/1  agents: 1/1
+
+📊 AI Analysis (via panel(big-pickle)):
+   Per-agent consensus across 1 panel models for 1 agent(s)
+
+// agents.sisyphus
+{
+  "model": "opencode/big-pickle",
+  "routing": [],
+  "fallback_models": []
+}
+
+  ✓ Backup saved to /tmp/omo-qa-7hHfrr/home/.config/opencode/oh-my-openagent.jsonc.pre-rebalance
+  Backup: /tmp/omo-qa-7hHfrr/home/.config/opencode/oh-my-openagent.jsonc.pre-rebalance
+✅ 1 section(s) updated.
+
+→ Validating changes...
+  ✓ Reverted to previous config (backup at /tmp/omo-qa-7hHfrr/home/.config/opencode/oh-my-openagent.jsonc.pre-rebalance)
+  Recommendations were NOT applied. Fix the issues above and re-run.
+
+STDERR:
+
+✖ Validation FAILED.
+  agents.sisyphus.model: unknown model opencode/big-pickle
+
+✖ Validation failed after applying recommendations. Config was reverted to backup.
+

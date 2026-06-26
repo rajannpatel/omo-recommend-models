@@ -1,0 +1,16 @@
+✔ normalizes Ollama recommendations to local model refs with startup progress (202.165697ms)
+✔ VRAM rejection excludes oversized local models and keeps fitting locals (131.709299ms)
+✔ unknown VRAM local models are rejected from recommendations (130.004988ms)
+✔ no GPU means local models are not recommended (133.669115ms)
+✔ stale panel cache is rejected before recommendations are displayed (205.129921ms)
+✔ canonical local output is local slash refs and local models never enter routing (70.085038ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 923.512083
+
+EXIT_CODE:0

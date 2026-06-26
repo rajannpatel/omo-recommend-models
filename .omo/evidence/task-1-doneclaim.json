@@ -1,0 +1,44 @@
+{
+  "DoneClaim": {
+    "task": "1. Stabilize the executable test harness and add failing coverage for the requested behaviors",
+    "changed_files": [
+      "test/omo-recommend-models.test.js",
+      ".omo/evidence/task-1-baseline-fixture.txt",
+      ".omo/evidence/task-1-red-vram-safe-model-validation.txt",
+      ".omo/evidence/task-1-doneclaim.json"
+    ],
+    "tests": [
+      "mkdir -p .omo/evidence && node --test --test-name-pattern \"AI panel runs recommendation models in pure text mode\" 2>&1 | tee .omo/evidence/task-1-baseline-fixture.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-baseline-fixture.txt => EXIT_CODE:0; 1 test passed; provider-models cache fixture failure removed",
+      "mkdir -p .omo/evidence && node --test 2>&1 | tee .omo/evidence/task-1-red-vram-safe-model-validation.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-red-vram-safe-model-validation.txt => EXIT_CODE:1; 10 tests run, 2 pass, 8 fail"
+    ],
+    "manual_qa": [
+      ".omo/evidence/task-1-red-vram-safe-model-validation.txt"
+    ],
+    "binary_observables": [
+      "Full RED command process exit recorded as EXIT_CODE:1 in .omo/evidence/task-1-red-vram-safe-model-validation.txt",
+      "Failing test names: VRAM rejection excludes oversized local models and keeps fitting locals; unknown VRAM local models are rejected from recommendations; no GPU means local models are not recommended; stale panel cache is rejected before recommendations are displayed; panel picker label and recommendation preview use JSONC fallback_models blocks; canonical local output is local slash refs and local models never enter routing; validator direct CLI supports help, config validation, malformed input, and safe fix; validator rollback integration restores config for normal apply and rebalance failures",
+      "The prior missing provider-models.json setup failure is absent from the final RED artifact; targeted baseline fixture command exits 0"
+    ],
+    "cleanup": [
+      "Temp dirs created by tests are registered with t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }))",
+      "Child process helpers enforce timeouts: runCli default 8000ms and runValidator default 5000ms",
+      "ps -eo pid=,args= | awk '/omo-recommend-models|omo-validate-config|opencode.js|node --test/ && !/awk/ { print }' => no output; no matching live test/executable processes remained"
+    ],
+    "adversarial_classes": {
+      "stale_state": "Probed with isolated temp HOME provider cache, local catalog, and panel-cache.json; stale panel cache test fails because current product loads 30-day-old cached local/oversized:70b when accepted.",
+      "dirty_worktree": "Probed with git status --short; baseline is untracked/dirty: ?? .omo/, ?? AGENTS.md, ?? bin/, ?? lib/, ?? task.md, ?? test/, ?? visual-engineering-recommendation.json. No unrelated files were reverted or edited.",
+      "misleading_success_output": "Probed by appending PIPESTATUS exit codes to evidence; RED artifact records EXIT_CODE:1 despite tee command returning 0.",
+      "flaky_tests": "Probed by using per-test mkdtemp homes, fake PATH-only opencode/ollama/nvidia-smi/validator binaries, no real user HOME, no network, and bounded child-process timeouts.",
+      "malformed_input": "Probed by validator direct CLI regression using malformed JSONC fixture plus invalid model-ref fixture; currently fails because bin/omo-validate-config is missing.",
+      "hung_or_long_commands": "Probed through runCli/runValidator timeout guards and fake commands; final process scan found no remaining matching processes.",
+      "prompt_injection": "N/A: tests use controlled fake AI JSON and do not add external untrusted prompt text.",
+      "cancel_resume": "N/A: no resumable flow added.",
+      "repeated_interruptions": "N/A: no mid-operation interrupt/retry flow added."
+    },
+    "risks": [
+      "Expected RED state: production behavior is intentionally not fixed in this task.",
+      "The validator executable is absent, so direct validator coverage fails with MODULE_NOT_FOUND until Task 5.",
+      "The rebalance rollback assertion currently exposes missing rollback after validator failure."
+    ]
+  }
+}

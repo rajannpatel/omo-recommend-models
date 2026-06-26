@@ -1,0 +1,111 @@
+{
+  "task": "Task 5 - recreate omo-validate-config and integrate existing shellouts",
+  "changed_files": [
+    {
+      "path": "bin/omo-validate-config",
+      "changes": [
+        "Added executable CommonJS validator CLI using built-in Node APIs only.",
+        "Implemented --config, --fix, --help, default CONFIG_PATH support, field-path stderr errors, nonzero invalid exits, and concise valid/fixed stdout.",
+        "Validates top-level object, $schema, agents/categories objects, section model/variant/routing/fallback_models, fallback option objects, provider/model syntax, provider cache existence when available, local facts when available, and unknown placement option keys.",
+        "--fix only adds missing $schema, canonicalizes ollama/ refs to local/, normalizes fallback array objects to strings only when no option fields are lost, deletes empty routing/fallback_models, formats JSON, and writes a .bak backup before modifying."
+      ]
+    },
+    {
+      "path": "lib/omo-shared.js",
+      "changes": [
+        "Replaced unsafe line-regex JSONC stripping with scanner-based comment and trailing-comma handling that preserves // inside strings.",
+        "Extended loadProviderModels with optional non-refreshing quiet mode for validation without network or opencode refresh side effects."
+      ]
+    },
+    {
+      "path": "bin/omo-recommend-models",
+      "changes": [
+        "Changed both validator shellouts to invoke the sibling validator via process.execPath and absolute script path.",
+        "Added rebalance validation rollback to restore BACKUP_PATH on sibling validator failure."
+      ]
+    },
+    {
+      "path": "test/omo-recommend-models.test.js",
+      "changes": [
+        "Updated the rollback integration regression to prove PATH fake validator is ignored and real sibling validator failures restore the prior config."
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "scenario": "executable bit",
+      "invocation": "test -x bin/omo-validate-config",
+      "binary_observable": "EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-validator-executable.txt"
+    },
+    {
+      "scenario": "syntax checks",
+      "invocation": "node --check lib/omo-shared.js && node --check bin/omo-validate-config && node --check bin/omo-recommend-models",
+      "binary_observable": "EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-syntax-check.txt"
+    },
+    {
+      "scenario": "targeted validator tests",
+      "invocation": "node --test --test-name-pattern \"validate|jsonc|schema|fix\"",
+      "binary_observable": "1 selected test passed, EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-vram-safe-model-validation.txt"
+    },
+    {
+      "scenario": "sibling validator rollback integration",
+      "invocation": "node --test --test-name-pattern \"validator rollback\"",
+      "binary_observable": "1 selected test passed, EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-rollback-check.txt"
+    }
+  ],
+  "manual_qa": [
+    {
+      "scenario": "help surface",
+      "invocation": "NODE_PATH=$PWD node ./bin/omo-validate-config --help",
+      "binary_observable": "usage printed, EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-validator-help.txt"
+    },
+    {
+      "scenario": "default config path",
+      "invocation": "NODE_PATH=$PWD HOME=<temp> XDG_CONFIG_HOME=<temp> node ./bin/omo-validate-config",
+      "binary_observable": "valid default config accepted, EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-validator-default.txt"
+    },
+    {
+      "scenario": "valid JSONC with comments, trailing comma, and // inside strings",
+      "invocation": "NODE_PATH=$PWD node ./bin/omo-validate-config --config <valid-temp-jsonc>",
+      "binary_observable": "Config valid, EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-validator-valid.txt"
+    },
+    {
+      "scenario": "invalid provider/model syntax",
+      "invocation": "NODE_PATH=$PWD node ./bin/omo-validate-config --config <invalid-temp-jsonc>",
+      "binary_observable": "agents.sisyphus.model field-path error, EXIT_CODE:1",
+      "artifact": ".omo/evidence/task-5-validator-invalid.txt"
+    },
+    {
+      "scenario": "safe fix and backup",
+      "invocation": "NODE_PATH=$PWD node ./bin/omo-validate-config --config <fixable-temp-jsonc> --fix",
+      "binary_observable": "fixed file contains local/tinyllama:1.1b, empty arrays removed, backup exists, EXIT_CODE:0",
+      "artifact": ".omo/evidence/task-5-validator-fix.txt"
+    }
+  ],
+  "cleanup": [
+    "Removed /tmp/omo-validator-qa-* manual QA directories after embedding fixture contents and command output in evidence artifacts.",
+    "No npm/package metadata, network fetches, or repo temp debug files were created.",
+    "Existing unrelated untracked repository files were not reverted or modified outside the scoped Task 5 files and evidence."
+  ],
+  "adversarial_classes": {
+    "malformed_input": "Covered invalid JSONC parse errors in node:test and invalid model refs in manual QA.",
+    "stale_state": "Provider cache and config were isolated under temp HOME/XDG_CONFIG_HOME; validator uses non-refreshing cache lookup.",
+    "dirty_worktree": "Worktree was already untracked/dirty; no unrelated revert was attempted.",
+    "misleading_success_output": "All tee/manual artifacts include explicit EXIT_CODE lines.",
+    "hung_or_long_commands": "No network fetches; validator uses bounded local file reads and existing short discoverLocalModels helper behavior.",
+    "flaky_tests": "Tests and manual QA use temp dirs/fake HOME and do not touch the real user config.",
+    "prompt_injection_cancel_resume_repeated_interruptions": "N/A for local deterministic CLI validation."
+  },
+  "risks": [
+    "Full node --test was not claimed for this task because known Task 2/3/4 failures remain outside Task 5 scope.",
+    "The validator intentionally implements the local subset this repo writes rather than the complete upstream oh-my-openagent schema.",
+    "Local model existence is enforced only when local catalog/discovery facts are available, matching the task requirement."
+  ]
+}

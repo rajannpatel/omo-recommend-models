@@ -1,0 +1,18 @@
+✔ AI panel runs recommendation models in pure text mode (175.651109ms)
+✔ normalizes Ollama recommendations to local model refs with startup progress (168.362186ms)
+✔ VRAM rejection excludes oversized local models and keeps fitting locals (118.079467ms)
+✔ unknown VRAM local models are rejected from recommendations (121.065014ms)
+✔ no GPU means local models are not recommended (126.519734ms)
+✔ stale panel cache is rejected before recommendations are displayed (206.136668ms)
+✔ panel picker label and recommendation preview use JSONC fallback_models blocks (127.287613ms)
+✔ canonical local output is local slash refs and local models never enter routing (99.726396ms)
+✔ validator direct CLI supports help, config validation, malformed input, and safe fix (139.779147ms)
+✔ validator rollback integration uses sibling validator and restores config (153.698138ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1487.279993

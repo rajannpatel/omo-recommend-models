@@ -1,0 +1,87 @@
+{
+  "DoneClaim": {
+    "changed_files": [
+      {
+        "path": "test/omo-recommend-models.test.js",
+        "changes": [
+          "SUPERSEDED by task-1-fix2: this DoneClaim previously claimed fake GPU VRAM was added to the canonical local fallback fixture, but gate review found that claim stale; see task-1-fix2 evidence for the verified correction.",
+          "Renamed the fake validator helper to writePathFakeValidator and renamed the rollback test to make the current PATH fake-validator strategy and Todo 5 sibling-validator dependency explicit."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix-baseline.txt",
+        "changes": [
+          "Captured required focused baseline run with EXIT_CODE:0."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix-red-vram-safe-model-validation.txt",
+        "changes": [
+          "Captured required full-suite RED run with EXIT_CODE:1 and intended production-gap failures."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix-doneclaim.json",
+        "changes": [
+          "Recorded this updated DoneClaim."
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "invocation": "node --test --test-name-pattern \"AI panel runs recommendation models in pure text mode\" 2>&1 | tee .omo/evidence/task-1-fix-baseline.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-fix-baseline.txt",
+        "result": "EXIT_CODE:0; tests 1, pass 1, fail 0",
+        "binary_observable": "Node test runner reports the focused AI panel pure-text scenario passed.",
+        "captured_artifact_path": ".omo/evidence/task-1-fix-baseline.txt"
+      },
+      {
+        "invocation": "node --test 2>&1 | tee .omo/evidence/task-1-fix-red-vram-safe-model-validation.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-fix-red-vram-safe-model-validation.txt",
+        "result": "EXIT_CODE:1; tests 10, pass 2, fail 8",
+        "binary_observable": "Full suite remains RED for production gaps, including VRAM filtering, no-GPU local rejection, stale cache rejection, picker label preview, local routing cleanup, missing sibling validator, and rollback failure.",
+        "captured_artifact_path": ".omo/evidence/task-1-fix-red-vram-safe-model-validation.txt"
+      }
+    ],
+    "manual_qa": {
+      "channel": "CLI/data-shaped surface",
+      "scenario": "Full Node test suite after Task 1 harness fix",
+      "invocation": "node --test",
+      "binary_observable": "Nonzero test-runner exit recorded as EXIT_CODE:1 with intended RED failures instead of the prior no-GPU/local-fallback contradiction.",
+      "captured_artifact_path": ".omo/evidence/task-1-fix-red-vram-safe-model-validation.txt"
+    },
+    "cleanup": {
+      "temp_files": "No repo temp files added outside .omo/evidence; test harness temp directories are registered with t.after cleanup.",
+      "production_files": "No production files edited.",
+      "worktree_scope": "Touched only test/omo-recommend-models.test.js and .omo/evidence/."
+    },
+    "adversarial_classes": {
+      "stale_state": {
+        "status": "re-probed",
+        "result": "Evidence artifacts were overwritten after the final test edit; the full-suite artifact includes the renamed PATH fake validator test and current RED output."
+      },
+      "misleading_success_output": {
+        "status": "re-probed",
+        "result": "The tee pipelines have shell status 0, so each artifact records PIPESTATUS explicitly: focused baseline EXIT_CODE:0, full suite EXIT_CODE:1."
+      },
+      "flaky_tests": {
+        "status": "re-probed",
+        "result": "The focused baseline was rerun after the final edit and passed; the full suite was rerun after the final edit and produced the expected nonzero RED result."
+      },
+      "malformed_input": {
+        "status": "re-probed",
+        "result": "The full suite includes the malformed-input validator scenario, but current production is blocked earlier by missing bin/omo-validate-config; this is captured in the full-suite artifact as a production gap."
+      },
+      "dirty_worktree": {
+        "status": "re-probed",
+        "result": "git status for scoped paths shows only test/omo-recommend-models.test.js and .omo/evidence/ as untracked/modified; the repository was already broadly untracked and no production path was edited."
+      },
+      "remaining_classes": {
+        "status": "N/A",
+        "result": "No additional adversarial class applied to this test-harness-only patch."
+      }
+    },
+    "risks": [
+      "The full suite is intentionally RED because production gaps remain; this patch only fixes the contradictory test harness assumption.",
+      "The rollback test remains coupled to the PATH fake-validator fixture until Todo 5 replaces it with sibling-validator invocation coverage."
+    ]
+  }
+}

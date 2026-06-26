@@ -1,0 +1,345 @@
+✔ AI panel runs recommendation models in pure text mode (198.6144ms)
+✔ normalizes Ollama recommendations to local model refs with startup progress (231.289961ms)
+✖ VRAM rejection excludes oversized local models and keeps fitting locals (132.153394ms)
+✖ unknown VRAM local models are rejected from recommendations (136.571696ms)
+✖ no GPU means local models are not recommended (146.008309ms)
+✖ stale panel cache is rejected before recommendations are displayed (206.721394ms)
+✖ panel picker label and recommendation preview use JSONC fallback_models blocks (142.373453ms)
+✖ canonical local output is local slash refs and local models never enter routing (92.483957ms)
+✖ validator direct CLI supports help, config validation, malformed input, and safe fix (28.654811ms)
+✖ validator rollback integration restores config with PATH fake validator (TODO Todo 5 sibling validator) (124.770352ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 2
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1499.77263
+
+✖ failing tests:
+
+test at test/omo-recommend-models.test.js:337:1
+✖ VRAM rejection excludes oversized local models and keeps fitting locals (132.153394ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /local\/oversized:70b/. Input:
+  
+  '  ⏳ Checking GPU...\r  ✓ Checking GPU: Small Test GPU (8 GB VRAM) (0s)\x1B[K\n' +
+    '  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n' +
+    '  ⏳ Discovering local model catalog...\r  ✓ Discovering local model catalog: 2 cached models (0s)\x1B[K\n' +
+    '  ⏳ Loading cloud provider cache...\r  • Loading cloud provider cache: skipped by --local-only\x1B[K\n' +
+    '  ✓ Model picture: 0 cloud provider(s), 0 installed local model(s)\n' +
+    '\n' +
+    '  ✓ Using 1 explicitly selected model(s): opencode/big-pickle\n' +
+    '\n' +
+    '== AI Panel: 1 agents, 1 panel models ==\n' +
+    '   Models: big-pickle\n' +
+    '\r\x1B[2K   tasks: 0/1  agents: 0/1\r\x1B[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 1/1  agents: 1/1\n' +
+    '\n' +
+    '📊 AI Analysis (via panel(big-pickle)):\n' +
+    '   Per-agent consensus across 1 panel models for 1 agent(s)\n' +
+    '\n' +
+    '──────────────────────────────────────\n' +
+    '  sisyphus (agent) ⚡\n' +
+    '    model:          -\n' +
+    '    fallback_models: -\n' +
+    '                    local/oversized:70b\n' +
+    '\n' +
+    '\n' +
+    '── AI: Local config placements (1) ────────\n' +
+    '  • oversized:70b → sisyphus (fallback)\n' +
+    '    Justification: Required as the local fallback model.\n' +
+    '\n' +
+    '── AI: Install (1) ────────────────────────\n' +
+    '  • oversized:70b  (40 GB, 40 GB VRAM, score 99)\n' +
+    '    Required as the local fallback model.\n' +
+    '\n' +
+    '   → Apply: omo-recommend-models\n' +
+    '\n'
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:350:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '  ⏳ Checking GPU...\r  ✓ Checking GPU: Small Test GPU (8 GB VRAM) (0s)\x1B[K\n  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n  ⏳ Discovering local model catalog...\r  ✓ Discovering local model catalog: 2 cached models (0s)\x1B[K\n  ⏳ Loading cloud provider cache...\r  • Loading cloud provider cache: skipped by --local-only\x1B[K\n  ✓ Model picture: 0 cloud provider(s), 0 installed local model(s)\n\n  ✓ Using 1 explicitly selected model(s): opencode/big-pickle\n\n== AI Panel: 1 agents, 1 panel models ==\n   Models: big-pickle\n\r\x1B[2K   tasks: 0/1  agents: 0/1\r\x1B[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 1/1  agents: 1/1\n\n📊 AI Analysis (via panel(big-pickle)):\n   Per-agent consensus across 1 panel models for 1 agent(s)\n\n──────────────────────────────────────\n  sisyphus (agent) ⚡\n    model:          -\n    fallback_models: -\n                    local/oversized:70b\n\n\n── AI: Local config placements (1) ────────\n  • oversized:70b → sisyphus (fallback)\n    Justification: Required as the local fallback model.\n\n── AI: Install (1) ────────────────────────\n  • oversized:70b  (40 GB, 40 GB VRAM, score 99)\n    Required as the local fallback model.\n\n   → Apply: omo-recommend-models\n\n',
+    expected: /local\/oversized:70b/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:355:1
+✖ unknown VRAM local models are rejected from recommendations (136.571696ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /local\/mystery:latest/. Input:
+  
+  '  ⏳ Checking GPU...\r  ✓ Checking GPU: Small Test GPU (8 GB VRAM) (0s)\x1B[K\n' +
+    '  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n' +
+    '  ⏳ Discovering local model catalog...\r  ✓ Discovering local model catalog: 2 cached models (0s)\x1B[K\n' +
+    '  ⏳ Loading cloud provider cache...\r  • Loading cloud provider cache: skipped by --local-only\x1B[K\n' +
+    '  ✓ Model picture: 0 cloud provider(s), 0 installed local model(s)\n' +
+    '\n' +
+    '  ✓ Using 1 explicitly selected model(s): opencode/big-pickle\n' +
+    '\n' +
+    '== AI Panel: 1 agents, 1 panel models ==\n' +
+    '   Models: big-pickle\n' +
+    '\r\x1B[2K   tasks: 0/1  agents: 0/1\r\x1B[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 1/1  agents: 1/1\n' +
+    '\n' +
+    '📊 AI Analysis (via panel(big-pickle)):\n' +
+    '   Per-agent consensus across 1 panel models for 1 agent(s)\n' +
+    '\n' +
+    '──────────────────────────────────────\n' +
+    '  sisyphus (agent) ⚡\n' +
+    '    model:          -\n' +
+    '    fallback_models: -\n' +
+    '                    local/mystery:latest\n' +
+    '\n' +
+    '\n' +
+    '── AI: Local config placements (1) ────────\n' +
+    '  • mystery:latest → sisyphus (fallback)\n' +
+    '    Justification: Required as the local fallback model.\n' +
+    '\n' +
+    '── AI: Install (1) ────────────────────────\n' +
+    '  • mystery:latest  (unknown, undefined GB VRAM, score 100)\n' +
+    '    Required as the local fallback model.\n' +
+    '\n' +
+    '   → Apply: omo-recommend-models\n' +
+    '\n'
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:368:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '  ⏳ Checking GPU...\r  ✓ Checking GPU: Small Test GPU (8 GB VRAM) (0s)\x1B[K\n  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n  ⏳ Discovering local model catalog...\r  ✓ Discovering local model catalog: 2 cached models (0s)\x1B[K\n  ⏳ Loading cloud provider cache...\r  • Loading cloud provider cache: skipped by --local-only\x1B[K\n  ✓ Model picture: 0 cloud provider(s), 0 installed local model(s)\n\n  ✓ Using 1 explicitly selected model(s): opencode/big-pickle\n\n== AI Panel: 1 agents, 1 panel models ==\n   Models: big-pickle\n\r\x1B[2K   tasks: 0/1  agents: 0/1\r\x1B[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 1/1  agents: 1/1\n\n📊 AI Analysis (via panel(big-pickle)):\n   Per-agent consensus across 1 panel models for 1 agent(s)\n\n──────────────────────────────────────\n  sisyphus (agent) ⚡\n    model:          -\n    fallback_models: -\n                    local/mystery:latest\n\n\n── AI: Local config placements (1) ────────\n  • mystery:latest → sisyphus (fallback)\n    Justification: Required as the local fallback model.\n\n── AI: Install (1) ────────────────────────\n  • mystery:latest  (unknown, undefined GB VRAM, score 100)\n    Required as the local fallback model.\n\n   → Apply: omo-recommend-models\n\n',
+    expected: /local\/mystery:latest/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:373:1
+✖ no GPU means local models are not recommended (146.008309ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /local\/tinyllama:1\.1b/. Input:
+  
+  '  ⏳ Checking GPU...\r  ✓ Checking GPU: No GPU detected (0s)\x1B[K\n' +
+    '  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n' +
+    '  ⏳ Discovering local model catalog...\r  ✓ Discovering local model catalog: 1 cached models (0s)\x1B[K\n' +
+    '  ⏳ Loading cloud provider cache...\r  • Loading cloud provider cache: skipped by --local-only\x1B[K\n' +
+    '  ✓ Model picture: 0 cloud provider(s), 0 installed local model(s)\n' +
+    '\n' +
+    '  ✓ Using 1 explicitly selected model(s): opencode/big-pickle\n' +
+    '\n' +
+    '== AI Panel: 1 agents, 1 panel models ==\n' +
+    '   Models: big-pickle\n' +
+    '\r\x1B[2K   tasks: 0/1  agents: 0/1\r\x1B[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 1/1  agents: 1/1\n' +
+    '\n' +
+    '📊 AI Analysis (via panel(big-pickle)):\n' +
+    '   Per-agent consensus across 1 panel models for 1 agent(s)\n' +
+    '\n' +
+    '──────────────────────────────────────\n' +
+    '  sisyphus (agent) ⚡\n' +
+    '    model:          -\n' +
+    '    fallback_models: -\n' +
+    '                    local/tinyllama:1.1b\n' +
+    '\n' +
+    '\n' +
+    '── AI: Local config placements (1) ────────\n' +
+    '  • tinyllama:1.1b → sisyphus (fallback)\n' +
+    '    Justification: Required as the local fallback model.\n' +
+    '\n' +
+    '── AI: Install (1) ────────────────────────\n' +
+    '  • tinyllama:1.1b  (0.6 GB, 0.2 GB VRAM, score 30)\n' +
+    '    Required as the local fallback model.\n' +
+    '\n' +
+    '   → Apply: omo-recommend-models\n' +
+    '\n'
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:385:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '  ⏳ Checking GPU...\r  ✓ Checking GPU: No GPU detected (0s)\x1B[K\n  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n  ⏳ Discovering local model catalog...\r  ✓ Discovering local model catalog: 1 cached models (0s)\x1B[K\n  ⏳ Loading cloud provider cache...\r  • Loading cloud provider cache: skipped by --local-only\x1B[K\n  ✓ Model picture: 0 cloud provider(s), 0 installed local model(s)\n\n  ✓ Using 1 explicitly selected model(s): opencode/big-pickle\n\n== AI Panel: 1 agents, 1 panel models ==\n   Models: big-pickle\n\r\x1B[2K   tasks: 0/1  agents: 0/1\r\x1B[2K   tasks: 1/1  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 1/1  agents: 1/1\n\n📊 AI Analysis (via panel(big-pickle)):\n   Per-agent consensus across 1 panel models for 1 agent(s)\n\n──────────────────────────────────────\n  sisyphus (agent) ⚡\n    model:          -\n    fallback_models: -\n                    local/tinyllama:1.1b\n\n\n── AI: Local config placements (1) ────────\n  • tinyllama:1.1b → sisyphus (fallback)\n    Justification: Required as the local fallback model.\n\n── AI: Install (1) ────────────────────────\n  • tinyllama:1.1b  (0.6 GB, 0.2 GB VRAM, score 30)\n    Required as the local fallback model.\n\n   → Apply: omo-recommend-models\n\n',
+    expected: /local\/tinyllama:1\.1b/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:389:1
+✖ stale panel cache is rejected before recommendations are displayed (206.721394ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /Loaded cached panel result/. Input:
+  
+  '  ⏳ Checking GPU...\r  ✓ Checking GPU: No GPU detected (0s)\x1B[K\n' +
+    '  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n' +
+    '  ⏳ Discovering local model catalog...\r  • Discovering local model catalog: skipped by --cloud-only\x1B[K\n' +
+    '  ⏳ Loading cloud provider cache...\r  ✓ Loading cloud provider cache: 1 provider(s) (0s)\x1B[K\n' +
+    '  ✓ Model picture: 1 cloud provider(s), 0 installed local model(s)\n' +
+    '\n' +
+    '\n' +
+    'Available opencode models (2):\n' +
+    '  [1] opencode/big-pickle\n' +
+    '  [2] opencode/north-mini-code-free\n' +
+    '  [a] All (default)\n' +
+    'Select models by number (e.g. 1,3,5) or press Enter for all: [Cached] panel results from 2026-05-27 04:59:34 (30.0d ago). Use cached? (y/N)   ✓ Loaded cached panel result.\n' +
+    '\n' +
+    '\n' +
+    '📊 AI Analysis (via panel(opencode/old-free)):\n' +
+    '   stale cached recommendations\n' +
+    '\n' +
+    '──────────────────────────────────────\n' +
+    '  sisyphus (agent) ⚡\n' +
+    '    model:          -\n' +
+    '    recommended:    local/oversized:70b\n' +
+    '                    stale cache\n' +
+    '    fallback_models: -\n' +
+    '                    opencode/big-pickle\n' +
+    '\n' +
+    'Apply all recommendations above? (y/N)   Skipped.\n' +
+    '\n'
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:429:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '  ⏳ Checking GPU...\r  ✓ Checking GPU: No GPU detected (0s)\x1B[K\n  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n  ⏳ Discovering local model catalog...\r  • Discovering local model catalog: skipped by --cloud-only\x1B[K\n  ⏳ Loading cloud provider cache...\r  ✓ Loading cloud provider cache: 1 provider(s) (0s)\x1B[K\n  ✓ Model picture: 1 cloud provider(s), 0 installed local model(s)\n\n\nAvailable opencode models (2):\n  [1] opencode/big-pickle\n  [2] opencode/north-mini-code-free\n  [a] All (default)\nSelect models by number (e.g. 1,3,5) or press Enter for all: [Cached] panel results from 2026-05-27 04:59:34 (30.0d ago). Use cached? (y/N)   ✓ Loaded cached panel result.\n\n\n📊 AI Analysis (via panel(opencode/old-free)):\n   stale cached recommendations\n\n──────────────────────────────────────\n  sisyphus (agent) ⚡\n    model:          -\n    recommended:    local/oversized:70b\n                    stale cache\n    fallback_models: -\n                    opencode/big-pickle\n\nApply all recommendations above? (y/N)   Skipped.\n\n',
+    expected: /Loaded cached panel result/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:434:1
+✖ panel picker label and recommendation preview use JSONC fallback_models blocks (142.373453ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /agent-model recommendations from:/. Input:
+  
+  '  ⏳ Checking GPU...\r  ✓ Checking GPU: No GPU detected (0s)\x1B[K\n' +
+    '  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n' +
+    '  ⏳ Discovering local model catalog...\r  • Discovering local model catalog: skipped by --cloud-only\x1B[K\n' +
+    '  ⏳ Loading cloud provider cache...\r  ✓ Loading cloud provider cache: 1 provider(s) (0s)\x1B[K\n' +
+    '  ✓ Model picture: 1 cloud provider(s), 0 installed local model(s)\n' +
+    '\n' +
+    '\n' +
+    'Available opencode models (2):\n' +
+    '  [1] opencode/big-pickle\n' +
+    '  [2] opencode/north-mini-code-free\n' +
+    '  [a] All (default)\n' +
+    'Select models by number (e.g. 1,3,5) or press Enter for all: == AI Panel: 1 agents, 2 panel models ==\n' +
+    '   Models: big-pickle  north-mini-code-free\n' +
+    '\r\x1B[2K   tasks: 0/2  agents: 0/1\r\x1B[2K   tasks: 1/2  agents: 0/1  evaluating sisyphus\r\x1B[2K   tasks: 2/2  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 2/2  agents: 1/1\n' +
+    '\n' +
+    '📊 AI Analysis (via panel(big-pickle+north-mini-code-free)):\n' +
+    '   Per-agent consensus across 2 panel models for 1 agent(s)\n' +
+    '\n' +
+    '──────────────────────────────────────\n' +
+    '  sisyphus (agent) ⚡\n' +
+    '    model:          -\n' +
+    '    recommended:    opencode/big-pickle\n' +
+    '                    2/2 models — best cloud\n' +
+    '    fallback_models: -\n' +
+    '                    opencode/north-mini-code-free\n' +
+    '\n' +
+    'Apply all recommendations above? (y/N) '
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:458:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '  ⏳ Checking GPU...\r  ✓ Checking GPU: No GPU detected (0s)\x1B[K\n  ⏳ Checking Ollama...\r  ✓ Checking Ollama: not installed (0s)\x1B[K\n  ⏳ Discovering local model catalog...\r  • Discovering local model catalog: skipped by --cloud-only\x1B[K\n  ⏳ Loading cloud provider cache...\r  ✓ Loading cloud provider cache: 1 provider(s) (0s)\x1B[K\n  ✓ Model picture: 1 cloud provider(s), 0 installed local model(s)\n\n\nAvailable opencode models (2):\n  [1] opencode/big-pickle\n  [2] opencode/north-mini-code-free\n  [a] All (default)\nSelect models by number (e.g. 1,3,5) or press Enter for all: == AI Panel: 1 agents, 2 panel models ==\n   Models: big-pickle  north-mini-code-free\n\r\x1B[2K   tasks: 0/2  agents: 0/1\r\x1B[2K   tasks: 1/2  agents: 0/1  evaluating sisyphus\r\x1B[2K   tasks: 2/2  agents: 1/1  evaluating sisyphus\r\x1B[2K   tasks: 2/2  agents: 1/1\n\n📊 AI Analysis (via panel(big-pickle+north-mini-code-free)):\n   Per-agent consensus across 2 panel models for 1 agent(s)\n\n──────────────────────────────────────\n  sisyphus (agent) ⚡\n    model:          -\n    recommended:    opencode/big-pickle\n                    2/2 models — best cloud\n    fallback_models: -\n                    opencode/north-mini-code-free\n\nApply all recommendations above? (y/N) ',
+    expected: /agent-model recommendations from:/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:465:1
+✖ canonical local output is local slash refs and local models never enter routing (92.483957ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'local/tinyllama:1.1b'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:498:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'local/tinyllama:1.1b' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:503:1
+✖ validator direct CLI supports help, config validation, malformed input, and safe fix (28.654811ms)
+  AssertionError [ERR_ASSERTION]: node:internal/modules/cjs/loader:1520
+    throw err;
+    ^
+  
+  Error: Cannot find module '/home/ubuntu/omo-recommend/bin/omo-validate-config'
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+      at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+      at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+      at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+      at Module._load (node:internal/modules/cjs/loader:1294:5)
+      at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+      at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+      at node:internal/main/run_main_module:33:47 {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: []
+  }
+  
+  Node.js v24.18.0
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:529:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/omo-recommend-models.test.js:550:1
+✖ validator rollback integration restores config with PATH fake validator (TODO Todo 5 sibling validator) (124.770352ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+    '{\n' +
+      '  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",\n' +
+      '  "agents": {\n' +
+      '    "sisyphus": {\n' +
+      '      "model_quality": "balanced",\n' +
+      '      "description": "Primary orchestrator and architectural planner",\n' +
+  +   '      "model": "opencode/big-pickle"\n' +
+  -   '      "model": "opencode/north-mini-code-free"\n' +
+      '    }\n' +
+      '  },\n' +
+      '  "categories": {}\n' +
+      '}\n'
+  
+      at TestContext.<anonymous> (/home/ubuntu/omo-recommend/test/omo-recommend-models.test.js:588:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '{\n  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",\n  "agents": {\n    "sisyphus": {\n      "model_quality": "balanced",\n      "description": "Primary orchestrator and architectural planner",\n      "model": "opencode/big-pickle"\n    }\n  },\n  "categories": {}\n}\n',
+    expected: '{\n  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",\n  "agents": {\n    "sisyphus": {\n      "model_quality": "balanced",\n      "description": "Primary orchestrator and architectural planner",\n      "model": "opencode/north-mini-code-free"\n    }\n  },\n  "categories": {}\n}\n',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+EXIT_CODE:1

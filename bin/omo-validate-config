@@ -1,0 +1,445 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const {
+  CONFIG_PATH,
+  CACHE_DIR,
+  jsoncParse,
+  loadProviderModels,
+  buildProviderAliases,
+  resolveProvider,
+  buildRichModelLookup,
+  discoverLocalModels,
+} = require("../lib/omo-shared");
+
+const DEFAULT_SCHEMA =
+  "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json";
+
+const FALLBACK_OPTION_KEYS = new Set([
+  "model",
+  "variant",
+  "reasoningEffort",
+  "temperature",
+  "top_p",
+  "maxTokens",
+  "thinking",
+]);
+
+const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function usage() {
+  return [
+    "Usage: omo-validate-config [--config <path>] [--fix] [--help]",
+    "",
+    "Validate the local oh-my-openagent.jsonc subset written by OMO tooling.",
+    "",
+    "Options:",
+    "  --config <path>  Validate a specific JSONC config file",
+    "  --fix            Apply safe mechanical fixes after creating <path>.bak",
+    "  --help           Show this help",
+  ].join("\n");
+}
+
+function parseArgs(argv) {
+  const options = { configPath: CONFIG_PATH, fix: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--fix") {
+      options.fix = true;
+    } else if (arg === "--config") {
+      const value = argv[++i];
+      if (!value) throw new Error("--config requires a path");
+      options.configPath = path.resolve(value);
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseConfigFile(configPath) {
+  let text;
+  try {
+    text = fs.readFileSync(configPath, "utf8");
+  } catch (err) {
+    throw new Error(`${configPath}: ${err.message}`);
+  }
+
+  try {
+    return { config: jsoncParse(text), text };
+  } catch (err) {
+    throw new Error(`JSONC parse error: ${err.message}`);
+  }
+}
+
+function refFromParts(provider, model) {
+  return `${provider}/${model}`;
+}
+
+function splitModelRef(ref) {
+  if (typeof ref !== "string") return null;
+  const slash = ref.indexOf("/");
+  if (slash <= 0 || slash === ref.length - 1) return null;
+  const provider = ref.slice(0, slash).trim();
+  const model = ref.slice(slash + 1).trim();
+  if (!provider || !model || /\s/.test(provider)) return null;
+  return { provider, model };
+}
+
+function canonicalizeModelRef(ref) {
+  const parts = splitModelRef(ref);
+  if (!parts) return ref;
+  if (parts.provider === "ollama") return refFromParts("local", parts.model);
+  return ref;
+}
+
+function loadLocalFacts() {
+  const names = new Set();
+  let available = false;
+  const catalogPath = path.join(CACHE_DIR, "ollama-models.json");
+
+  if (fs.existsSync(catalogPath)) {
+    available = true;
+    try {
+      const raw = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+      const models = Array.isArray(raw) ? raw : raw?.ollama?.models;
+      for (const item of Array.isArray(models) ? models : []) {
+        const name = typeof item === "string" ? item : item?.name;
+        if (name) names.add(name);
+      }
+    } catch {
+      // A corrupt optional local catalog should not hide config syntax errors.
+    }
+  }
+
+  const discovered = discoverLocalModels();
+  if (discovered.length > 0) available = true;
+  for (const name of discovered) names.add(name);
+
+  return { available, names };
+}
+
+function buildFacts(config) {
+  const cache = loadProviderModels({ refresh: false, quiet: true });
+  return {
+    aliases: buildProviderAliases(config),
+    modelLookup: buildRichModelLookup(cache),
+    hasProviderCache: Boolean(cache && cache.models),
+    local: loadLocalFacts(),
+  };
+}
+
+function addError(errors, location, message) {
+  errors.push(`${location}: ${message}`);
+}
+
+function validateModelRef(value, location, facts, errors) {
+  if (typeof value !== "string") {
+    addError(errors, location, "must be a provider/model string");
+    return;
+  }
+
+  const ref = splitModelRef(value);
+  if (!ref) {
+    addError(errors, location, "must use provider/model syntax");
+    return;
+  }
+
+  if (ref.provider === "ollama") {
+    addError(errors, location, "use local/<model> for local model references");
+    return;
+  }
+
+  if (ref.provider === "local") {
+    if (facts.local.available && !facts.local.names.has(ref.model)) {
+      addError(errors, location, `unknown local model ${ref.model}`);
+    }
+    return;
+  }
+
+  if (!facts.hasProviderCache) return;
+  const provider = resolveProvider(ref.provider, facts.aliases);
+  const providerSet = facts.modelLookup.sets[provider] || facts.modelLookup.sets[ref.provider];
+  if (!providerSet) {
+    addError(errors, location, `unknown provider ${ref.provider}`);
+    return;
+  }
+  if (!providerSet.has(ref.model)) {
+    addError(errors, location, `unknown model ${ref.provider}/${ref.model}`);
+  }
+}
+
+function validateNumberRange(value, location, min, max, errors) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    addError(errors, location, "must be a finite number");
+    return;
+  }
+  if (value < min || value > max) addError(errors, location, `must be between ${min} and ${max}`);
+}
+
+function validateThinking(value, location, errors) {
+  if (!isPlainObject(value)) {
+    addError(errors, location, "must be an object");
+    return;
+  }
+  for (const key of Object.keys(value)) {
+    if (key !== "type" && key !== "budgetTokens") {
+      addError(errors, `${location}.${key}`, "unknown thinking option");
+    }
+  }
+  if (value.type !== "enabled" && value.type !== "disabled") {
+    addError(errors, `${location}.type`, "must be enabled or disabled");
+  }
+  if ("budgetTokens" in value && (typeof value.budgetTokens !== "number" || !Number.isFinite(value.budgetTokens))) {
+    addError(errors, `${location}.budgetTokens`, "must be a finite number");
+  }
+}
+
+function validatePlacementObject(value, location, facts, errors) {
+  if (!isPlainObject(value)) {
+    addError(errors, location, "must be a model reference string or object");
+    return;
+  }
+  for (const key of Object.keys(value)) {
+    if (!FALLBACK_OPTION_KEYS.has(key)) addError(errors, `${location}.${key}`, "unknown model placement option");
+  }
+  if (!("model" in value)) {
+    addError(errors, `${location}.model`, "is required");
+  } else {
+    validateModelRef(value.model, `${location}.model`, facts, errors);
+  }
+  if ("variant" in value && typeof value.variant !== "string") {
+    addError(errors, `${location}.variant`, "must be a string");
+  }
+  if ("reasoningEffort" in value && !REASONING_EFFORTS.has(value.reasoningEffort)) {
+    addError(errors, `${location}.reasoningEffort`, "must be a known reasoning effort");
+  }
+  if ("temperature" in value) validateNumberRange(value.temperature, `${location}.temperature`, 0, 2, errors);
+  if ("top_p" in value) validateNumberRange(value.top_p, `${location}.top_p`, 0, 1, errors);
+  if ("maxTokens" in value && (typeof value.maxTokens !== "number" || !Number.isFinite(value.maxTokens))) {
+    addError(errors, `${location}.maxTokens`, "must be a finite number");
+  }
+  if ("thinking" in value) validateThinking(value.thinking, `${location}.thinking`, errors);
+}
+
+function validatePlacementArray(value, location, facts, errors) {
+  if (!Array.isArray(value)) {
+    addError(errors, location, "must be an array");
+    return;
+  }
+  value.forEach((item, index) => {
+    const itemPath = `${location}.${index}`;
+    if (typeof item === "string") validateModelRef(item, itemPath, facts, errors);
+    else validatePlacementObject(item, itemPath, facts, errors);
+  });
+}
+
+function validateFallbacks(value, location, facts, errors) {
+  if (typeof value === "string") {
+    validateModelRef(value, location, facts, errors);
+    return;
+  }
+  validatePlacementArray(value, location, facts, errors);
+}
+
+function validateSection(section, location, facts, errors) {
+  if (!isPlainObject(section)) {
+    addError(errors, location, "must be an object");
+    return;
+  }
+
+  if ("model" in section) validateModelRef(section.model, `${location}.model`, facts, errors);
+  if ("variant" in section && typeof section.variant !== "string") {
+    addError(errors, `${location}.variant`, "must be a string");
+  }
+  if ("variant" in section && !("model" in section)) {
+    addError(errors, `${location}.variant`, "requires model");
+  }
+  if ("routing" in section) validatePlacementArray(section.routing, `${location}.routing`, facts, errors);
+  if ("fallback_models" in section) validateFallbacks(section.fallback_models, `${location}.fallback_models`, facts, errors);
+}
+
+function validateConfig(config) {
+  const errors = [];
+
+  if (!isPlainObject(config)) {
+    addError(errors, "$", "top-level config must be an object");
+    return errors;
+  }
+
+  const facts = buildFacts(config);
+
+  if (typeof config.$schema !== "string" || config.$schema.trim() === "") {
+    addError(errors, "$schema", "must be a non-empty string");
+  }
+  if (!isPlainObject(config.agents)) {
+    addError(errors, "agents", "must be an object");
+  } else {
+    for (const [name, section] of Object.entries(config.agents)) {
+      validateSection(section, `agents.${name}`, facts, errors);
+    }
+  }
+  if (!isPlainObject(config.categories)) {
+    addError(errors, "categories", "must be an object");
+  } else {
+    for (const [name, section] of Object.entries(config.categories)) {
+      validateSection(section, `categories.${name}`, facts, errors);
+    }
+  }
+
+  return errors;
+}
+
+function objectToRef(value) {
+  if (!isPlainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length === 1 && typeof value.model === "string") return value.model;
+  if (
+    keys.length === 2 &&
+    typeof value.provider === "string" &&
+    typeof value.model === "string"
+  ) {
+    return refFromParts(value.provider, value.model);
+  }
+  return null;
+}
+
+function fixPlacementValue(value) {
+  if (typeof value === "string") return canonicalizeModelRef(value);
+  const asRef = objectToRef(value);
+  if (asRef) return canonicalizeModelRef(asRef);
+  if (isPlainObject(value) && typeof value.model === "string") {
+    value.model = canonicalizeModelRef(value.model);
+  }
+  return value;
+}
+
+function fixRoutingValue(value) {
+  if (typeof value === "string") return canonicalizeModelRef(value);
+  if (isPlainObject(value) && typeof value.model === "string") {
+    value.model = canonicalizeModelRef(value.model);
+  }
+  return value;
+}
+
+function fixSection(section) {
+  let changed = false;
+  if (!isPlainObject(section)) return changed;
+
+  if (typeof section.model === "string") {
+    const next = canonicalizeModelRef(section.model);
+    if (next !== section.model) {
+      section.model = next;
+      changed = true;
+    }
+  }
+
+  if (Array.isArray(section.routing)) {
+    const nextRouting = section.routing.map(fixRoutingValue);
+    if (JSON.stringify(nextRouting) !== JSON.stringify(section.routing)) {
+      section.routing = nextRouting;
+      changed = true;
+    }
+    if (section.routing.length === 0) {
+      delete section.routing;
+      changed = true;
+    }
+  }
+
+  if (Array.isArray(section.fallback_models)) {
+    const nextFallbacks = section.fallback_models.map(fixPlacementValue);
+    if (JSON.stringify(nextFallbacks) !== JSON.stringify(section.fallback_models)) {
+      section.fallback_models = nextFallbacks;
+      changed = true;
+    }
+    if (section.fallback_models.length === 0) {
+      delete section.fallback_models;
+      changed = true;
+    }
+  }
+
+  if (typeof section.fallback_models === "string") {
+    const next = canonicalizeModelRef(section.fallback_models);
+    if (next !== section.fallback_models) {
+      section.fallback_models = next;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function applyFixes(config) {
+  let changed = false;
+  if (isPlainObject(config) && typeof config.$schema !== "string") {
+    config.$schema = DEFAULT_SCHEMA;
+    changed = true;
+  }
+  for (const sectionGroup of [config.agents, config.categories]) {
+    if (!isPlainObject(sectionGroup)) continue;
+    for (const section of Object.values(sectionGroup)) {
+      if (fixSection(section)) changed = true;
+    }
+  }
+  return changed;
+}
+
+function writeFixedConfig(configPath, config) {
+  const backupPath = `${configPath}.bak`;
+  fs.copyFileSync(configPath, backupPath);
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return backupPath;
+}
+
+function main() {
+  let options;
+  try {
+    options = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error(err.message);
+    console.error(usage());
+    return 2;
+  }
+
+  if (options.help) {
+    console.log(usage());
+    return 0;
+  }
+
+  let config;
+  try {
+    ({ config } = parseConfigFile(options.configPath));
+  } catch (err) {
+    console.error(err.message);
+    return 1;
+  }
+
+  let fixed = false;
+  if (options.fix) fixed = applyFixes(config);
+
+  const errors = validateConfig(config);
+  if (errors.length > 0) {
+    for (const error of errors) console.error(error);
+    return 1;
+  }
+
+  if (options.fix && fixed) {
+    const backupPath = writeFixedConfig(options.configPath, config);
+    console.log(`Config valid after fixes: ${options.configPath}`);
+    console.log(`Backup: ${backupPath}`);
+    return 0;
+  }
+
+  console.log(`Config valid: ${options.configPath}`);
+  return 0;
+}
+
+process.exitCode = main();

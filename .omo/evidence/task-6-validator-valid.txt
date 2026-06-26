@@ -1,0 +1,3 @@
+VALID CONFIG: exit 0
+Config valid: /tmp/omo-qa-vld-0ToWq5/valid.jsonc
+

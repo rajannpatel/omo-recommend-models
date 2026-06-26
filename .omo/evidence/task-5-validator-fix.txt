@@ -1,0 +1,37 @@
+COMMAND: NODE_PATH=$PWD node ./bin/omo-validate-config --config /tmp/omo-validator-qa-eA5wM5/fixable.jsonc --fix
+--- fixable fixture before ---
+{
+  "agents": {
+    "sisyphus": {
+      "model": "ollama/tinyllama:1.1b",
+      "routing": [],
+      "fallback_models": [
+        { "model": "ollama/tinyllama:1.1b" }
+      ]
+    }
+  },
+  "categories": {}
+}
+
+--- output ---
+Config valid after fixes: /tmp/omo-validator-qa-eA5wM5/fixable.jsonc
+Backup: /tmp/omo-validator-qa-eA5wM5/fixable.jsonc.bak
+
+EXIT_CODE:0
+
+--- fixed file ---
+{
+  "agents": {
+    "sisyphus": {
+      "model": "local/tinyllama:1.1b",
+      "fallback_models": [
+        "local/tinyllama:1.1b"
+      ]
+    }
+  },
+  "categories": {},
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json"
+}
+
+--- backup exists ---
+yes

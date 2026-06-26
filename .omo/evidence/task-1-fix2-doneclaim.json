@@ -1,0 +1,108 @@
+{
+  "DoneClaim": {
+    "changed_files": [
+      {
+        "path": "test/omo-recommend-models.test.js",
+        "changes": [
+          "Added fake GPU VRAM to the normalization fixture for \"normalizes Ollama recommendations to local model refs with startup progress\" so its expected local/tinyllama:1.1b output is internally consistent with local eligibility rules.",
+          "Left the separate \"no GPU means local models are not recommended\" rejection coverage unchanged; it still has no gpu fixture and still expects no local/tinyllama:1.1b output."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix-doneclaim.json",
+        "changes": [
+          "Marked the prior fake-GPU DoneClaim wording as superseded because gate review found it was stale before this fix2 patch."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix2-normalization.txt",
+        "changes": [
+          "Captured the required focused normalization test run with EXIT_CODE:0."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix2-baseline.txt",
+        "changes": [
+          "Captured the required focused AI panel baseline test run with EXIT_CODE:0."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix2-red-vram-safe-model-validation.txt",
+        "changes": [
+          "Captured the required full-suite RED run with EXIT_CODE:1."
+        ]
+      },
+      {
+        "path": ".omo/evidence/task-1-fix2-doneclaim.json",
+        "changes": [
+          "Recorded this DoneClaim."
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "scenario": "Normalization fixture expecting eligible Ollama local output",
+        "invocation": "node --test --test-name-pattern \"normalizes Ollama recommendations to local model refs with startup progress\" 2>&1 | tee .omo/evidence/task-1-fix2-normalization.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-fix2-normalization.txt",
+        "result": "EXIT_CODE:0; tests 1, pass 1, fail 0",
+        "binary_observable": "Node test runner reports the focused normalization scenario passed after the fixture gained fake GPU VRAM.",
+        "captured_artifact_path": ".omo/evidence/task-1-fix2-normalization.txt"
+      },
+      {
+        "scenario": "Existing AI panel pure-text baseline",
+        "invocation": "node --test --test-name-pattern \"AI panel runs recommendation models in pure text mode\" 2>&1 | tee .omo/evidence/task-1-fix2-baseline.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-fix2-baseline.txt",
+        "result": "EXIT_CODE:0; tests 1, pass 1, fail 0",
+        "binary_observable": "Node test runner reports the focused AI panel pure-text scenario passed.",
+        "captured_artifact_path": ".omo/evidence/task-1-fix2-baseline.txt"
+      },
+      {
+        "scenario": "Full Task 1 RED suite for VRAM-safe model validation",
+        "invocation": "node --test 2>&1 | tee .omo/evidence/task-1-fix2-red-vram-safe-model-validation.txt; printf '\\nEXIT_CODE:%s\\n' \"${PIPESTATUS[0]}\" >> .omo/evidence/task-1-fix2-red-vram-safe-model-validation.txt",
+        "result": "EXIT_CODE:1; tests 10, pass 2, fail 8",
+        "binary_observable": "Full suite remains nonzero for intended production gaps; the corrected normalization test passes, and the separate no-GPU rejection test still fails because production emits local/tinyllama:1.1b with no GPU.",
+        "captured_artifact_path": ".omo/evidence/task-1-fix2-red-vram-safe-model-validation.txt"
+      }
+    ],
+    "manual_qa": {
+      "channel": "CLI/data-shaped surface",
+      "scenario": "Full Node test suite after correcting the normalization fixture contradiction",
+      "invocation": "node --test",
+      "binary_observable": "Nonzero test-runner result recorded as EXIT_CODE:1; artifact shows the normalization test passed and the no-GPU rejection test did not become a contradictory passing local-fallback case.",
+      "captured_artifact_path": ".omo/evidence/task-1-fix2-red-vram-safe-model-validation.txt"
+    },
+    "cleanup": {
+      "temp_files": "No repo temp files added outside .omo/evidence; harness temp directories are registered with t.after cleanup.",
+      "production_files": "No production files edited.",
+      "worktree_scope": "Scoped status checked for test/omo-recommend-models.test.js and .omo/evidence/ only; the broader repo was already untracked/dirty."
+    },
+    "adversarial_classes": {
+      "stale_state": {
+        "status": "re-probed",
+        "result": "New fix2 artifacts were captured after the test edit; stale prior DoneClaim wording was marked superseded."
+      },
+      "misleading_success_output": {
+        "status": "re-probed",
+        "result": "Each tee pipeline artifact records PIPESTATUS explicitly: normalization EXIT_CODE:0, baseline EXIT_CODE:0, full suite EXIT_CODE:1."
+      },
+      "flaky_tests": {
+        "status": "re-probed",
+        "result": "All three requested scenarios were rerun after the final edit with isolated harness temp homes and bounded child-process timeouts."
+      },
+      "malformed_input": {
+        "status": "re-probed",
+        "result": "The full suite still includes the malformed-input validator scenario; current production fails earlier with missing bin/omo-validate-config, captured in the full-suite artifact."
+      },
+      "dirty_worktree": {
+        "status": "re-probed",
+        "result": "Scoped git status shows only the allowed test file and .omo/evidence/ path as changed/untracked for this task; no production path was edited."
+      },
+      "remaining_classes": {
+        "status": "N/A",
+        "result": "No additional adversarial class applied to this tests/evidence-only patch."
+      }
+    },
+    "risks": [
+      "The full suite is intentionally RED because production VRAM filtering, stale cache rejection, UI text, local routing cleanup, missing validator, and rollback gaps remain.",
+      "The rollback test remains acceptable for Task 1 and still uses the PATH fake-validator strategy; sibling validator wiring was not implemented."
+    ]
+  }
+}

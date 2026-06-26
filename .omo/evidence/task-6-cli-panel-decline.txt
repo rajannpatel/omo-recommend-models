@@ -1,0 +1,28 @@
+EXIT CODE: 0
+STDOUT:
+  ⏳ Checking GPU...  ✓ Checking GPU: No GPU detected (0s)[K
+  ⏳ Checking Ollama...  ✓ Checking Ollama: not installed (0s)[K
+  ⏳ Discovering local model catalog...  • Discovering local model catalog: skipped by --cloud-only[K
+  ⏳ Loading cloud provider cache...  ✓ Loading cloud provider cache: 1 provider(s) (0s)[K
+  ✓ Model picture: 1 cloud provider(s), 0 installed local model(s)
+
+
+agent-model recommendations from:
+  [1] opencode/big-pickle
+  [2] opencode/north-mini-code-free
+  [a] All (default)
+Select models by number (e.g. 1,3,5) or press Enter for all: == AI Panel: 1 agents, 2 panel models ==
+   Models: big-pickle  north-mini-code-free
+[2K   tasks: 0/2  agents: 0/1[2K   tasks: 1/2  agents: 0/1  evaluating sisyphus[2K   tasks: 2/2  agents: 1/1  evaluating sisyphus[2K   tasks: 2/2  agents: 1/1
+
+📊 AI Analysis (via panel(big-pickle+north-mini-code-free)):
+   Per-agent consensus across 2 panel models for 1 agent(s)
+
+  • agents.sisyphus
+    model: opencode/big-pickle
+    routing: 
+    fallback_models: opencode/north-mini-code-free
+
+Apply all recommendations above? (y/N) 
+STDERR:
+

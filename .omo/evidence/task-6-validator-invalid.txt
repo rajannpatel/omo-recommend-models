@@ -1,0 +1,4 @@
+INVALID CONFIG: exit 1
+STDERR:
+agents.sisyphus.model: must use provider/model syntax
+

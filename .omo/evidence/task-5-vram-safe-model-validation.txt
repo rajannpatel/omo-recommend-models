@@ -1,0 +1,11 @@
+✔ validator direct CLI supports help, config validation, malformed input, and safe fix (183.84367ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 250.426162
+
+EXIT_CODE:0

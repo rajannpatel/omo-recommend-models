@@ -1,0 +1,12 @@
+COMMAND: NODE_PATH=$PWD node ./bin/omo-validate-config --help
+--- output ---
+Usage: omo-validate-config [--config <path>] [--fix] [--help]
+
+Validate the local oh-my-openagent.jsonc subset written by OMO tooling.
+
+Options:
+  --config <path>  Validate a specific JSONC config file
+  --fix            Apply safe mechanical fixes after creating <path>.bak
+  --help           Show this help
+
+EXIT_CODE:0

@@ -1,0 +1,42 @@
+EXIT CODE: 1
+STDOUT:
+  ⏳ Checking GPU...  ✓ Checking GPU: No GPU detected (0s)[K
+  ⏳ Checking Ollama...  ✓ Checking Ollama: not installed (0s)[K
+  ⏳ Discovering local model catalog...  • Discovering local model catalog: skipped by --cloud-only[K
+
+🔮 Algorithmic tier chains for /tmp/omo-qa-zR1wBi/home/.config/opencode/oh-my-openagent.jsonc
+
+── reasoning chain ──────────────────────────────
+  → primary: opencode/north-mini-code-free (5)
+
+── balanced chain ──────────────────────────────
+  → primary: opencode/north-mini-code-free (5)
+
+── fast chain ──────────────────────────────
+  → primary: opencode/north-mini-code-free (5)
+
+── Agents / Categories ───────────────────────
+  1 section(s) with model references:
+
+  sisyphus (agent)
+    quality:    balanced
+    current:    opencode/big-pickle
+    recommend:  opencode/north-mini-code-free ⚡ would change
+
+
+📋 1 section(s) would be restructured:
+
+  agents.sisyphus — tier: balanced
+  ✓ Backup saved to /tmp/omo-qa-zR1wBi/home/.config/opencode/oh-my-openagent.jsonc.pre-rebalance
+  Backup: /tmp/omo-qa-zR1wBi/home/.config/opencode/oh-my-openagent.jsonc.pre-rebalance
+✅ 1 section(s) restructured.
+
+  ✓ Reverted to previous config (backup at /tmp/omo-qa-zR1wBi/home/.config/opencode/oh-my-openagent.jsonc.pre-rebalance)
+
+STDERR:
+categories.bad.routing.0: must use provider/model syntax
+
+✖ Validation FAILED.
+
+✖ Command failed: "/snap/node/11696/bin/node" "/home/ubuntu/omo-recommend/bin/omo-validate-config" --fix
+

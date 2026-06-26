@@ -1,0 +1,19 @@
+COMMAND: NODE_PATH=$PWD HOME=<temp> XDG_CONFIG_HOME=<temp> node ./bin/omo-validate-config
+--- default config fixture ---
+{
+  // URL string intentionally contains // and must not be stripped.
+  "$schema": "https://example.invalid/schema//with-slashes.json",
+  "agents": {
+    "sisyphus": {
+      "description": "keeps // inside strings",
+      "model": "opencode/big-pickle",
+      "fallback_models": ["opencode/north-mini-code-free",],
+    },
+  },
+  "categories": {},
+}
+
+--- output ---
+Config valid: /tmp/omo-validator-qa-eA5wM5/home/.config/opencode/oh-my-openagent.jsonc
+
+EXIT_CODE:0
