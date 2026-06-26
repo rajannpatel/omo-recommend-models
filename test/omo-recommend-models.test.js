@@ -275,6 +275,16 @@ function readConfig(configPath) {
   return JSON.parse(fs.readFileSync(configPath, "utf8"));
 }
 
+test("captured recommendation output fixture is a JSON array of records", () => {
+  const fixturePath = path.join(repoRoot, "bin", "recommendation-output.json");
+  const parsed = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+  assert.ok(Array.isArray(parsed), "fixture should be a JSON array");
+  assert.ok(parsed.length > 0, "fixture should contain recommendation entries");
+  assert.equal(typeof parsed[0], "object");
+  assert.ok(parsed[0] && typeof parsed[0].name === "string");
+  assert.ok(parsed[0] && typeof parsed[0].type === "string");
+});
+
 test("AI panel runs recommendation models in pure text mode", async (t) => {
   const harness = createHarness(t);
 
