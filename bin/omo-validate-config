@@ -172,7 +172,7 @@ function validateModelRef(value, location, facts, errors) {
     addError(errors, location, `unknown provider ${ref.provider}`);
     return;
   }
-  if (!providerSet.has(ref.model)) {
+  if (!providerSet.has(ref.model) && !providerSet.has(`${ref.provider}/${ref.model}`) && !providerSet.has(`${provider}/${ref.model}`)) {
     addError(errors, location, `unknown model ${ref.provider}/${ref.model}`);
   }
 }

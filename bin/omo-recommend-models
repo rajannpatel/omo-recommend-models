@@ -569,7 +569,7 @@ function findModelInCache(providerKey, modelID, aliases, lookup) {
   const realProvider = resolveProvider(providerKey, aliases);
   const modelMap = lookup.byId[realProvider];
   if (!modelMap) return null;
-  return modelMap.get(modelID) || null;
+  return modelMap.get(modelID) || modelMap.get(`${providerKey}/${modelID}`) || modelMap.get(`${realProvider}/${modelID}`) || null;
 }
 
 function rebalanceEntry(entry, options) {
@@ -1257,13 +1257,6 @@ async function runPanelAndSelect(config, cloudLookup, allLocalModels, gpu, ollam
   const agents = allConfigEntries(config);
   if (agents.length === 0) throw new Error("No agents or categories in config");
 
-  // Model labels for the header line
-  const maxLabelLen = Math.max(4, Math.floor((60 - 10) / Math.max(1, models.length)) - 2);
-  const modelLabels = models.map((m) => {
-    const s = m.split("/").pop() || m;
-    return s.length > maxLabelLen ? s.slice(0, maxLabelLen - 1) + ".." : s;
-  });
-
   // Per-agent state
   const state = agents.map((entry) => ({
     name: entry.name,
@@ -1275,7 +1268,7 @@ async function runPanelAndSelect(config, cloudLookup, allLocalModels, gpu, ollam
 
   // ── Header (printed once, scrolls naturally) ──
   console.log(`== AI Panel: ${agents.length} agents, ${models.length} panel models ==`);
-  console.log(`   Models: ${modelLabels.join("  ")}`);
+  console.log(`   Models: ${models.join(", ")}`);
 
   // ── Compact single-line status bar (updates via \r) ──
   const totalTasks = agents.length * models.length;
@@ -2051,8 +2044,7 @@ async function main() {
       // Build multiline bulleted display
       console.log(`\nCached panel result:`);
       if (cachedModelList.length > 0) {
-        const stripped = cachedModelList.map((m) => m.startsWith("opencode/") ? m.slice(9) : m);
-        console.log(`  \u2022 Surveyed AI models: ${stripped.join(", ")}`);
+        console.log(`  \u2022 Surveyed AI models: ${cachedModelList.join(", ")}`);
       }
       if (cached.gpu && cached.gpu.label) {
         const gpuLine = `  \u2022 Hardware: ${cached.gpu.label}`;
