@@ -1,3 +1,5 @@
+https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
+
 # omo-recommend-models
 
 A CLI utility that profiles your GPU and recommends the most optimized local and cloud AI models for OpenCode and OmO. Run this whenever a new model drops to instantly optimize your configuration for performance and price, completely eliminating the need to manually calculate VRAM footprints or benchmark throughput.
