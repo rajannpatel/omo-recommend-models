@@ -195,6 +195,57 @@ esac
   fs.writeFileSync(fakePath, fake, { mode: 0o755 });
 }
 
+function writeFakeCodex(binDir, options = {}) {
+  const fakePath = path.join(binDir, "codex");
+  const output = options.output ?? `JSON.stringify(payload) + "\\n"`;
+  const fake = `#!/usr/bin/env node
+const fs = require("node:fs");
+const logPath = process.env.OMO_FAKE_CLI_LOG;
+if (logPath) fs.appendFileSync(logPath, JSON.stringify({ tool: "codex", args: process.argv.slice(2) }) + "\\n");
+const payload = {
+  name: "sisyphus",
+  type: "agent",
+  profile: "codex probe",
+  model: { provider: "opencode", model: "big-pickle", reason: "fake codex recommendation" },
+  routing: [],
+  fallback_models: []
+};
+process.stdout.write(${output});
+`;
+  fs.writeFileSync(fakePath, fake, { mode: 0o755 });
+}
+
+function writeFakeAgy(binDir, options = {}) {
+  const fakePath = path.join(binDir, "agy");
+  const output = options.output ?? `JSON.stringify(payload) + "\\n"`;
+  const modelsOutput = JSON.stringify(options.models || [
+    "Atlas Standard (Medium)",
+    "Atlas Heavy (High)",
+    "Atlas Sprint (Low)",
+    "Beacon Core (Low)"
+  ]);
+  const fake = `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const logPath = process.env.OMO_FAKE_CLI_LOG;
+if (logPath) fs.appendFileSync(logPath, JSON.stringify({ tool: "agy", args }) + "\\n");
+if (args[0] === "models") {
+  process.stdout.write(${modelsOutput}.join("\\n") + "\\n");
+  process.exit(0);
+}
+const payload = {
+  name: "sisyphus",
+  type: "agent",
+  profile: "agy probe",
+  model: { provider: "opencode", model: "north-mini-code-free", reason: "fake agy recommendation" },
+  routing: [],
+  fallback_models: []
+};
+process.stdout.write(${output});
+`;
+  fs.writeFileSync(fakePath, fake, { mode: 0o755 });
+}
+
 function writeFakeGpu(binDir, options = { name: "Test GPU", vramGb: 8 }) {
   const fakePath = path.join(binDir, "nvidia-smi");
   const memMiB = Math.round(options.vramGb * 1024);
@@ -242,6 +293,8 @@ function createHarness(t, options = {}) {
     );
   }
   if (options.ollamaModels) writeFakeOllama(binDir, options.ollamaModels);
+  if (options.codex) writeFakeCodex(binDir, options.codexOptions || {});
+  if (options.agy) writeFakeAgy(binDir, options.agyOptions || {});
   if (options.gpu) writeFakeGpu(binDir, options.gpu);
   if (options.validator) writePathFakeValidator(binDir, options.validator);
   if (options.panelCache) writePanelCache(homeDir, options.panelCache.result, options.panelCache);
@@ -252,6 +305,7 @@ function createHarness(t, options = {}) {
     PATH: binDir,
     NODE_PATH: repoRoot,
     OMO_FAKE_LOG: path.join(tempDir, "opencode-args.log"),
+    OMO_FAKE_CLI_LOG: path.join(tempDir, "cli-args.log"),
     OMO_FAKE_PROMPT_LOG: path.join(tempDir, "opencode-prompts.log"),
     TERM: "dumb",
   };
@@ -757,7 +811,7 @@ test("validator rollback integration uses sibling validator and restores config"
   assert.equal(fs.readFileSync(rebalance.configPath, "utf8"), rebalanceOriginal);
 });
 
-test("quota exceeded errors do not block recommendations by default", async (t) => {
+test("selected quota exceeded panel models are rejected by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -789,7 +843,9 @@ test("quota exceeded errors do not block recommendations by default", async (t) 
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  assert.equal(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+  assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+  assert.match(result.stdout, /quota-exceeded-prov.*model-1/);
+  assert.match(result.stdout, /quota-exceeded/);
 });
 
 test("quota exceeded errors block recommendations with exclude flag", async (t) => {
@@ -831,7 +887,7 @@ test("quota exceeded errors block recommendations with exclude flag", async (t) 
   assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
 });
 
-test("quota exceeded errors in stdout do not block recommendations by default", async (t) => {
+test("selected stdout quota errors are rejected by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -863,7 +919,9 @@ test("quota exceeded errors in stdout do not block recommendations by default", 
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  assert.equal(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
+  assert.notEqual(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
+  assert.match(result.stdout, /stdout-quota-prov.*model-1/);
+  assert.match(result.stdout, /quota-exceeded/);
 });
 
 test("recommendation preview displays prevModel when newModel is null", async (t) => {
@@ -1121,4 +1179,173 @@ test("interactive model picker lists paid models without availability probes by 
   assert.match(result.stdout, /Evaluate these models for opencode OMO agent roles:/);
   assert.match(result.stdout, /good-prov\/model-paid/);
   assert.match(result.stdout, /quota-exceeded-prov\/model-bad/);
+});
+
+test("AI Panel default selection diversifies capable paid models and excludes small contexts", async (t) => {
+  const initialConfig = defaultConfig();
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "github-copilot": [
+          { id: "claude-opus-4.8", family: "claude-opus", context_length: 200000 },
+          { id: "claude-opus-4.7", family: "claude-opus", context_length: 200000 },
+          { id: "claude-sonnet-4.8", family: "claude-sonnet", context_length: 200000 },
+          { id: "claude-sonnet-4.7", family: "claude-sonnet", context_length: 200000 },
+          { id: "claude-haiku-4.0", family: "claude-haiku", context_length: 200000 },
+        ],
+        openai: [
+          { id: "gpt-5.5-pro", family: "gpt-pro", context_length: 200000 },
+        ],
+        anthropic: [
+          { id: "claude-opus-4.6", family: "claude-opus", context_length: 200000 },
+        ],
+        google: [
+          { id: "gemini-3-pro", family: "gemini-pro", context_length: 200000 },
+        ],
+        "small-context-prov": [
+          { id: "tiny-context-king", family: "gpt-pro", context_length: 4096 },
+        ],
+      },
+    },
+    aiResponse: {
+      analysis: "diverse panel recommendation",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "openai", model: "gpt-5.5-pro", reason: "best capable model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /tiny-context-king/);
+
+  const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
+  const githubRefs = queryBlock.match(/github-copilot:/g) || [];
+  assert.ok(githubRefs.length <= 2, queryBlock);
+  assert.match(queryBlock, /openai\/gpt: gpt-5\.5-pro/);
+  assert.match(queryBlock, /anthropic\/claude-opus: claude-opus-4\.6/);
+  assert.match(queryBlock, /google\/gemini: gemini-3-pro/);
+});
+
+test("detected codex and agy occupy preferred AI Panel slots and use low-tier CLI models", async (t) => {
+  const harness = createHarness(t, {
+    codex: true,
+    agy: true,
+    config: defaultConfig({
+      root: {
+        omo: {
+          panel_cli_agents: {
+            codex: { model: "codex-low-tier" },
+          },
+        },
+      },
+    }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+        "small-context-prov": [
+          { id: "tiny-context-king", family: "gpt-pro", context_length: 4096 },
+        ],
+      },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
+  assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
+  assert.match(result.stdout, /AI Analysis \(via panel\(codex\+agy\+big-pickle\+north-mini-code-free\)\)/);
+  assert.doesNotMatch(result.stdout, /tiny-context-king/);
+  assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/codex:[\s\S]*1\/1 successful responses/);
+  assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
+
+  const cliCalls = fs.readFileSync(harness.env.OMO_FAKE_CLI_LOG, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.args[0] !== "models");
+  const codexCall = cliCalls.find((entry) => entry.tool === "codex");
+  const agyCall = cliCalls.find((entry) => entry.tool === "agy");
+  assert.ok(codexCall, "expected codex call");
+  assert.ok(agyCall, "expected agy call");
+  assert.ok(codexCall.args.includes("exec"));
+  assert.ok(codexCall.args.includes("--model"));
+  assert.equal(codexCall.args[codexCall.args.indexOf("--model") + 1], "codex-low-tier");
+  assert.ok(agyCall.args.includes("--model"));
+  assert.match(agyCall.args[agyCall.args.indexOf("--model") + 1], /\(Low\)$/);
+});
+
+test("configured Codex CLI panel usage includes detected agy and is disclosed explicitly", async (t) => {
+  const harness = createHarness(t, {
+    codex: true,
+    agy: true,
+    config: defaultConfig({
+      root: {
+        omo: {
+          panel_models: ["cli/codex"],
+        },
+      },
+    }),
+  });
+
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Configured CLI panel agents: cli\/codex \(Codex CLI\), cli\/agy/);
+  assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
+  assert.match(result.stdout, /AI Analysis \(via panel\(codex\+agy\)\)/);
+});
+
+test("invalid CLI probe output is excluded from the AI Panel before voting", async (t) => {
+  const harness = createHarness(t, {
+    codex: true,
+    agy: true,
+    codexOptions: { output: `"not-json\\n"` },
+    config: defaultConfig({
+      root: {
+        omo: {
+          panel_cli_agents: {
+            codex: { model: "codex-low-tier" },
+          },
+        },
+      },
+    }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "tier-one", family: "family-a", context_length: 200000 },
+          { id: "tier-two", family: "family-b", context_length: 64000 },
+        ],
+      },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
+  assert.match(result.stdout, /Verifying panel models availability: 4 of 5 model\(s\) available/);
+  assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
+  assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
+  assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
+  assert.match(result.stdout, /AI Analysis \(via panel\(agy\+big-pickle\+tier-one\+north-mini-code-free\)\)/);
 });

@@ -198,6 +198,13 @@ const VARIANT_BONUS = { xhigh: 10, max: 8, high: 5, medium: 0, low: -5 };
 const LOCAL_PROVIDER = "local";
 const FREE_PROVIDERS = ["opencode", LOCAL_PROVIDER];
 const QUALITY_TIERS = ["reasoning", "balanced", "fast"];
+const MAX_PANEL_MODELS = 5;
+const MIN_PANEL_CONTEXT_TOKENS = Math.max(
+  32000,
+  Number.parseInt(process.env.OMO_PANEL_MIN_CONTEXT_TOKENS || "32000", 10) ||
+  32000,
+);
+let cachedAgyPanelModel = undefined;
 const quotaExceededProviders = new Set();
 const providerAvailability = new Map();
 const providerExclusionOptions = {
@@ -609,9 +616,7 @@ function defaultPanelModels(config, cloudLookup = null) {
     discovered.length > 0
       ? discovered
       : opencodePanelModelsFromLookup(cloudLookup);
-  const allFree = sortPanelModelRefs(refs, config);
-  const MAX_PANEL = 5;
-  return allFree.length > MAX_PANEL ? allFree.slice(0, MAX_PANEL) : allFree;
+  return preferDetectedCliPanelModels(refs, config, cloudLookup);
 }
 
 function plannedPanelModels(config, panelModels, cloudLookup = null) {
@@ -807,6 +812,250 @@ function modelRef(provider, modelName) {
   return formatModelRef(provider, modelName);
 }
 
+function splitModelRef(ref) {
+  const trimmed = String(ref || "").trim();
+  const slash = trimmed.indexOf("/");
+  if (slash === -1) return { provider: "", model: trimmed };
+  return {
+    provider: trimmed.slice(0, slash),
+    model: trimmed.slice(slash + 1),
+  };
+}
+
+function isCliProvider(provider) {
+  return provider === "cli";
+}
+
+function cloudModelMeta(ref, cloudLookup) {
+  const { provider, model } = splitModelRef(ref);
+  if (!provider || !model) return null;
+  const modelMap = cloudLookup?.byId?.[provider];
+  if (!modelMap) return null;
+  if (modelMap instanceof Map) {
+    return modelMap.get(model) || modelMap.get(ref) || null;
+  }
+  return modelMap[model] || modelMap[ref] || null;
+}
+
+function contextTokenLimit(meta) {
+  const raw =
+    meta?.context_length ??
+    meta?.context_window ??
+    meta?.context ??
+    meta?.max_context_tokens ??
+    meta?.max_input_tokens ??
+    null;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function hasEnoughContextForPanel(ref, cloudLookup) {
+  const { provider } = splitModelRef(ref);
+  if (!provider || provider === LOCAL_PROVIDER || isCliProvider(provider))
+    return true;
+  const meta = cloudModelMeta(ref, cloudLookup);
+  const limit = contextTokenLimit(meta);
+  return limit === null || limit >= MIN_PANEL_CONTEXT_TOKENS;
+}
+
+function panelCandidateFamily(ref, cloudLookup) {
+  const { provider, model } = splitModelRef(ref);
+  if (isCliProvider(provider)) return "cli";
+  const metaFamily = String(cloudModelMeta(ref, cloudLookup)?.family || "");
+  return panelModelFamilyLabel(metaFamily || model) || model.toLowerCase();
+}
+
+function isPanelCandidateUsable(ref, cloudLookup) {
+  const { provider, model } = splitModelRef(ref);
+  if (!provider || !model) return false;
+  if (!isProviderAvailable(provider)) return false;
+  return hasEnoughContextForPanel(ref, cloudLookup);
+}
+
+function hasPanelCandidateShapeAndContext(ref, cloudLookup) {
+  const { provider, model } = splitModelRef(ref);
+  if (!provider || !model) return false;
+  return hasEnoughContextForPanel(ref, cloudLookup);
+}
+
+function uniqueModelRefs(refs) {
+  const seen = new Set();
+  const out = [];
+  for (const ref of refs || []) {
+    const trimmed = String(ref || "").trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function sortedPanelCandidates(refs, config, cloudLookup) {
+  return uniqueModelRefs(refs)
+    .filter((ref) => isPanelCandidateUsable(ref, cloudLookup))
+    .map((ref, index) => {
+      const { provider } = splitModelRef(ref);
+      const meta = cloudModelMeta(ref, cloudLookup);
+      return {
+        ref,
+        index,
+        provider,
+        family: panelCandidateFamily(ref, cloudLookup),
+        score: scoreModel(ref, null, meta),
+      };
+    })
+    .sort((a, b) => {
+      const order = panelModelOrder(config);
+      if (order !== "score") {
+        const opencodeDiff =
+          Number(b.provider === "opencode") - Number(a.provider === "opencode");
+        if (opencodeDiff !== 0) return opencodeDiff;
+      }
+      return b.score - a.score || a.index - b.index;
+    });
+}
+
+function selectDiversePanelModels(refs, config, cloudLookup, max = MAX_PANEL_MODELS) {
+  const candidates = sortedPanelCandidates(refs, config, cloudLookup);
+  const selected = [];
+  const usedRefs = new Set();
+  const usedProviders = new Set();
+  const usedFamilies = new Set();
+  const select = (candidate) => {
+    if (usedRefs.has(candidate.ref) || selected.length >= max) return;
+    selected.push(candidate.ref);
+    usedRefs.add(candidate.ref);
+    usedProviders.add(candidate.provider);
+    usedFamilies.add(candidate.family);
+  };
+
+  const passes = [
+    (candidate) =>
+      !usedProviders.has(candidate.provider) &&
+      !usedFamilies.has(candidate.family),
+    (candidate) => !usedProviders.has(candidate.provider),
+    (candidate) => !usedFamilies.has(candidate.family),
+    () => true,
+  ];
+
+  for (const pass of passes) {
+    for (const candidate of candidates) {
+      if (selected.length >= max) break;
+      if (pass(candidate)) select(candidate);
+    }
+  }
+  return selected;
+}
+
+function filterUsablePanelModels(refs, cloudLookup) {
+  return uniqueModelRefs(refs).filter((ref) =>
+    isPanelCandidateUsable(ref, cloudLookup),
+  );
+}
+
+function filterPanelModelsForContext(refs, cloudLookup) {
+  return uniqueModelRefs(refs).filter((ref) =>
+    hasPanelCandidateShapeAndContext(ref, cloudLookup),
+  );
+}
+
+function isUsableRecommendation(rec, cloudLookup) {
+  if (!rec || !rec.provider || !rec.model) return false;
+  if (!isProviderAvailable(rec.provider)) return false;
+  if (rec.provider === LOCAL_PROVIDER || isCliProvider(rec.provider)) return true;
+  return hasEnoughContextForPanel(modelRef(rec.provider, rec.model), cloudLookup);
+}
+
+function describeCliPanelModel(ref) {
+  const id = splitModelRef(ref).model;
+  if (id === "codex") return "cli/codex (Codex CLI)";
+  return `cli/${id}`;
+}
+
+function printCliPanelDisclosure(models, source) {
+  const cliModels = uniqueModelRefs(models).filter(
+    (ref) => splitModelRef(ref).provider === "cli",
+  );
+  if (cliModels.length === 0) return;
+  console.log(
+    `  • ${source} CLI panel agents: ${cliModels.map(describeCliPanelModel).join(", ")}\n`,
+  );
+}
+
+function includeDetectedCliPanelModels(models, config) {
+  const selected = uniqueModelRefs(models);
+  if (!selected.some((ref) => splitModelRef(ref).provider === "cli")) {
+    return selected;
+  }
+  const detectedRefs = discoverCliModels(config).map((agent) => agent.ref);
+  return uniqueModelRefs([...selected, ...detectedRefs]);
+}
+
+function preferDetectedCliPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS) {
+  const cliRefs = discoverCliModels(config)
+    .map((agent) => agent.ref)
+    .filter((ref) => hasPanelCandidateShapeAndContext(ref, cloudLookup));
+  const nonCliRefs = uniqueModelRefs(models).filter(
+    (ref) => splitModelRef(ref).provider !== "cli",
+  );
+  const remaining = Math.max(0, max - cliRefs.length);
+  const selectedNonCli =
+    remaining > 0
+      ? selectDiversePanelModels(nonCliRefs, config, cloudLookup, remaining)
+      : [];
+  return uniqueModelRefs([...cliRefs, ...selectedNonCli]).slice(0, max);
+}
+
+function selectPreferredPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS) {
+  return preferDetectedCliPanelModels(models, config, cloudLookup, max);
+}
+
+function normalizeCliModelLine(line) {
+  return String(line || "")
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .trim();
+}
+
+function rankAgyModel(line) {
+  const lower = normalizeCliModelLine(line).toLowerCase();
+  if (!lower) return Number.POSITIVE_INFINITY;
+  if (lower.includes("(low)") || lower.endsWith(" low")) return 0;
+  if (lower.includes("cheap") || lower.includes("budget")) return 1;
+  if (lower.includes("tiny") || lower.includes("mini") || lower.includes("small")) return 2;
+  if (lower.includes("(medium)") || lower.endsWith(" medium") || lower.includes("standard")) return 3;
+  if (lower.includes("(high)") || lower.endsWith(" high")) return 4;
+  if (lower.includes("large") || lower.includes("pro") || lower.includes("max") || lower.includes("ultra")) return 5;
+  return 6;
+}
+
+function resolveAgyPanelModel() {
+  if (cachedAgyPanelModel !== undefined) return cachedAgyPanelModel;
+  if (process.env.OMO_AGY_PANEL_MODEL) return process.env.OMO_AGY_PANEL_MODEL;
+  try {
+    const raw = execFileSync("agy", ["models"], {
+      encoding: "utf-8",
+      timeout: 10000,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, TERM: "dumb" },
+    });
+    const models = raw
+      .split("\n")
+      .map((line) => normalizeCliModelLine(line))
+      .filter(Boolean);
+    models.sort((a, b) => rankAgyModel(a) - rankAgyModel(b) || a.localeCompare(b));
+    cachedAgyPanelModel = models[0] || "";
+    return cachedAgyPanelModel;
+  } catch {
+    cachedAgyPanelModel = "";
+    return cachedAgyPanelModel;
+  }
+}
+
+function configuredCliPanelModel(config, id) {
+  return String(config?.omo?.panel_cli_agents?.[id]?.model || "").trim();
+}
+
 function providerState(provider) {
   if (!providerAvailability.has(provider)) {
     providerAvailability.set(provider, {
@@ -819,7 +1068,7 @@ function providerState(provider) {
 }
 
 function isProviderAvailable(provider, now = Date.now()) {
-  if (!provider || provider === LOCAL_PROVIDER || provider.startsWith("cli/"))
+  if (!provider || provider === LOCAL_PROVIDER || isCliProvider(provider))
     return true;
   if (opencodeOnlyMode && provider !== "opencode")
     return false;
@@ -869,12 +1118,18 @@ function markProviderRateLimited(provider, retryAfterSeconds, reason) {
 function probeModel(modelRef) {
   const slash = modelRef.indexOf("/");
   const provider = slash === -1 ? "" : modelRef.slice(0, slash);
-  if (!provider || provider === LOCAL_PROVIDER || provider === "opencode" || provider.startsWith("cli/")) {
+  if (!provider || provider === LOCAL_PROVIDER || provider === "opencode" || isCliProvider(provider)) {
     return Promise.resolve({ ok: true });
   }
 
   if (!isProviderAvailable(provider)) {
-    return Promise.resolve({ ok: false, reason: "provider-unavailable" });
+    const state = providerAvailability.get(provider);
+    const reason = state?.creditExhausted
+      ? "quota-exceeded"
+      : state?.rateLimitedUntil && state.rateLimitedUntil > Date.now()
+        ? "rate-limited"
+        : "provider-unavailable";
+    return Promise.resolve({ ok: false, reason });
   }
 
   if (providerProbePromises.has(provider)) {
@@ -1565,11 +1820,32 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
  */
 function discoverCliModels(config = {}) {
   const agents = [];
+  const codexPanelModel = configuredCliPanelModel(config, "codex");
+  const agyPanelModel =
+    configuredCliPanelModel(config, "agy") || resolveAgyPanelModel();
 
   function parseCliJson(raw) {
     const jsonMatch = String(raw || "").match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     return JSON.parse(jsonMatch[0]);
+  }
+
+  function parseAndValidateCliResponse(raw, fallbackName = "") {
+    let parsed = null;
+    try {
+      parsed = parseCliJson(raw);
+    } catch {
+      return null;
+    }
+    if (parsed && !parsed.name && fallbackName) {
+      parsed.name = fallbackName;
+    }
+    const rec = normalizeAgentRec(parsed);
+    if (!rec || !rec.name) return null;
+    if (rec.model !== null && (!rec.model.provider || !rec.model.model)) {
+      return null;
+    }
+    return rec;
   }
 
   function renderCliCommand(command, prompt) {
@@ -1595,27 +1871,102 @@ function discoverCliModels(config = {}) {
     return String(command || id).trim().split(/\s+/)[0];
   }
 
+  function compactCliFailure(error) {
+    const stdout = error?.stdout ? String(error.stdout) : "";
+    const stderr = error?.stderr ? String(error.stderr) : "";
+    return compactErrorText(`${stderr}\n${stdout}`) || error?.message || "";
+  }
+
+  function classifyCliFailure(output) {
+    const lower = String(output || "").toLowerCase();
+    if (
+      lower.includes("429") ||
+      lower.includes("rate limit") ||
+      lower.includes("rate_limit") ||
+      lower.includes("too many requests") ||
+      lower.includes("too_many_requests")
+    ) {
+      return "rate-limited";
+    }
+    if (
+      lower.includes("402") ||
+      lower.includes("payment required") ||
+      lower.includes("payment_required") ||
+      lower.includes("quota exceeded") ||
+      lower.includes("quota_exceeded") ||
+      lower.includes("billing limit") ||
+      lower.includes("billing_limit") ||
+      lower.includes("credit limit") ||
+      lower.includes("credit_limit") ||
+      lower.includes("insufficient funds") ||
+      lower.includes("insufficient_funds") ||
+      lower.includes("usage limit") ||
+      lower.includes("budget exceeded") ||
+      lower.includes("budget exhausted")
+    ) {
+      return "quota-exceeded";
+    }
+    return "process-error";
+  }
+
+  function buildCliInvoker(adapter) {
+    return (prompt) => {
+      const cmd = adapter.command(prompt);
+      if (!cmd) return { ok: false, reason: "missing-command", errorOutput: "" };
+      const options = {
+        encoding: "utf-8",
+        timeout: 120000,
+        maxBuffer: 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, TERM: "dumb" },
+      };
+      try {
+        const raw = Array.isArray(cmd)
+          ? execFileSync(cmd[0], cmd.slice(1), options)
+          : execSync(cmd, { ...options, shell: "/bin/sh" });
+        return { ok: true, output: raw };
+      } catch (error) {
+        const errorOutput = compactCliFailure(error);
+        return {
+          ok: false,
+          reason: classifyCliFailure(errorOutput),
+          errorOutput,
+        };
+      }
+    };
+  }
+
   const cliAdapters = [
     {
       binary: "codex",
       ref: "cli/codex",
+      panelModel: codexPanelModel,
       command: (prompt) =>
         [
           "codex",
-          "run",
-          "--model",
-          "opencode/big-pickle",
-          "--preset",
-          "json",
-          "--dangerously-skip-permissions",
+          "exec",
+          ...(codexPanelModel ? ["--model", codexPanelModel] : []),
+          "--skip-git-repo-check",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "--color",
+          "never",
           prompt,
         ],
     },
     {
       binary: "agy",
       ref: "cli/agy",
+      panelModel: agyPanelModel,
       command: (prompt) =>
-        ["agy", "--print", "--dangerously-skip-permissions", prompt],
+        [
+          "agy",
+          "--print",
+          "--dangerously-skip-permissions",
+          ...(agyPanelModel
+            ? ["--model", agyPanelModel]
+            : []),
+          prompt,
+        ],
     },
   ];
 
@@ -1628,6 +1979,7 @@ function discoverCliModels(config = {}) {
       cliAdapters.push({
         binary: inferCliBinary(entry, id),
         ref: `cli/${id.replace(/^cli\//, "")}`,
+        panelModel: String(entry?.model || "").trim(),
         command: (prompt) => renderCliCommand(command, prompt),
       });
     }
@@ -1638,25 +1990,30 @@ function discoverCliModels(config = {}) {
     try {
       const which = commandExists(adapter.binary);
       if (which) {
+        const invoke = buildCliInvoker(adapter);
         agents.push({
           ref: adapter.ref,
+          panelModel: adapter.panelModel || "",
+          probe: () => {
+            const result = invoke(
+              [
+                "Return only this JSON object and nothing else:",
+                '{"name":"probe","type":"agent","profile":"probe","model":null,"routing":[],"fallback_models":[]}',
+              ].join("\n"),
+            );
+            if (!result.ok) return result;
+            return parseAndValidateCliResponse(result.output, "probe")
+              ? { ok: true, output: result.output }
+              : {
+                  ok: false,
+                  reason: "invalid-response",
+                  errorOutput: "CLI probe returned invalid recommendation JSON",
+                };
+          },
           call: async (prompt) => {
-            try {
-              const cmd = adapter.command(prompt);
-              if (!cmd) return null;
-              const options = {
-                encoding: "utf-8",
-                timeout: 120000,
-                maxBuffer: 1024 * 1024,
-                stdio: ["ignore", "pipe", "pipe"],
-                env: { ...process.env, TERM: "dumb" },
-              };
-              const raw = Array.isArray(cmd)
-                ? execFileSync(cmd[0], cmd.slice(1), options)
-                : execSync(cmd, { ...options, shell: "/bin/sh" });
-              return parseCliJson(raw);
-            } catch {}
-            return null;
+            const result = invoke(prompt);
+            if (!result.ok) return null;
+            return parseAndValidateCliResponse(result.output);
           },
         });
       }
@@ -1916,6 +2273,10 @@ function callPanelModelAsync(model, prompt, signal, statusRef) {
   });
 }
 
+function findCliAgent(cliAgents, ref) {
+  return (cliAgents || []).find((agent) => agent.ref === ref) || null;
+}
+
 /**
  * Try to parse AI text as JSON with the expected schema.
  * Strips markdown fences and attempts JSON.parse.
@@ -2085,6 +2446,7 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
     const scored = [];
     for (const [id, meta] of modelMap.entries()) {
       const ref = `${provider}/${id}`;
+      if (!hasEnoughContextForPanel(ref, cloudLookup)) continue;
       const score = Math.round(scoreModel(ref, null, meta));
       const free = isModelFree(ref, meta);
       scored.push({
@@ -2380,18 +2742,25 @@ async function runPanelAndSelect(
   const cliAgents = discoverCliModels(config);
   let models;
   if (panelModels && panelModels.length > 0) {
-    models = panelModels;
+    models = filterPanelModelsForContext(panelModels, cloudLookup);
   } else {
     models = defaultPanelModels(config, cloudLookup);
     if (models.length === 0) throw new Error("No free models available");
   }
 
-  if (shouldProbeProviderAvailability()) {
+  if (models.length === 0) {
+    models = defaultPanelModels(config, cloudLookup);
+  }
+
+  {
     let availableModels = [];
     const progress = createProgress("Verifying panel models availability");
     let probeResults = [];
     try {
-      probeResults = await Promise.all(models.map((m) => probeModel(m)));
+      probeResults = await Promise.all(models.map((m) => {
+        const cliAgent = findCliAgent(cliAgents, m);
+        return cliAgent ? cliAgent.probe() : probeModel(m);
+      }));
       availableModels = models.filter((m, i) => probeResults[i].ok);
       progress.done(`${availableModels.length} of ${models.length} model(s) available`);
     } catch (err) {
@@ -2418,7 +2787,10 @@ async function runPanelAndSelect(
       }
       const progress2 = createProgress("Verifying free models availability");
       try {
-        const probeResults2 = await Promise.all(freeModels.map((m) => probeModel(m)));
+        const probeResults2 = await Promise.all(freeModels.map((m) => {
+          const cliAgent = findCliAgent(cliAgents, m);
+          return cliAgent ? cliAgent.probe() : probeModel(m);
+        }));
         availableModels = freeModels.filter((m, i) => probeResults2[i].ok);
         progress2.done(`${availableModels.length} of ${freeModels.length} model(s) available`);
       } catch (err) {
@@ -2532,6 +2904,15 @@ async function runPanelAndSelect(
   // Final status update
   currentAgent = "";
   updateStatus();
+  if (!process.stdout.isTTY) {
+    console.log("   Final successful responses:");
+    for (const model of models) {
+      const count = modelSuccessCounts.get(model) || 0;
+      console.log(
+        `${formatLinePrefix(model)}${formatCount(count, agents.length)} successful responses`,
+      );
+    }
+  }
   process.stdout.write("\n"); // new line after the status bar
 
   // ── Tally votes for all agents ──
@@ -2656,10 +3037,11 @@ function installedLocalNameSet(ollama) {
   );
 }
 
-function bestCloudRecommendationForProvider(provider, modelMap) {
+function bestCloudRecommendationForProvider(provider, modelMap, cloudLookup) {
   let best = null;
   for (const [id, meta] of modelMap || []) {
     const ref = modelRef(provider, id);
+    if (!hasEnoughContextForPanel(ref, cloudLookup)) continue;
     const score = scoreModel(ref, null, meta);
     if (!best || score > best.score) {
       best = {
@@ -2784,15 +3166,15 @@ function completeAiRecommendations(
     const norm =
       rec.model || rec.recommendations ? normalizeAgentRec({ ...rec }) : rec;
     norm.model = normalizeLocalRecommendation(norm.model, fittingByName, true);
-    if (norm.model && !isProviderAvailable(norm.model.provider)) {
+    if (norm.model && !isUsableRecommendation(norm.model, cloudLookup)) {
       norm.model = null;
     }
     norm.routing = (norm.routing || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, false))
-      .filter((r) => r && isProviderAvailable(r.provider));
+      .filter((r) => isUsableRecommendation(r, cloudLookup));
     norm.fallback_models = (norm.fallback_models || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
-      .filter((r) => r && isProviderAvailable(r.provider));
+      .filter((r) => isUsableRecommendation(r, cloudLookup));
     recByName.set(norm.name, norm);
   }
 
@@ -2801,7 +3183,10 @@ function completeAiRecommendations(
       provider !== LOCAL_PROVIDER &&
       modelMap &&
       modelMap.size > 0 &&
-      isProviderAvailable(provider),
+      isProviderAvailable(provider) &&
+      [...modelMap].some(([id]) =>
+        hasEnoughContextForPanel(modelRef(provider, id), cloudLookup),
+      ),
   );
 
   for (const entry of entries) {
@@ -2823,15 +3208,15 @@ function completeAiRecommendations(
       entry.section.model_quality ||
       "";
     rec.model = normalizeLocalRecommendation(rec.model, fittingByName, true);
-    if (rec.model && !isProviderAvailable(rec.model.provider)) {
+    if (rec.model && !isUsableRecommendation(rec.model, cloudLookup)) {
       rec.model = null;
     }
     rec.routing = (rec.routing || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, false))
-      .filter((r) => r && isProviderAvailable(r.provider));
+      .filter((r) => isUsableRecommendation(r, cloudLookup));
     rec.fallback_models = (rec.fallback_models || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
-      .filter((r) => r && isProviderAvailable(r.provider));
+      .filter((r) => isUsableRecommendation(r, cloudLookup));
 
     // Collect present providers across model + routing + fallback_models
     const presentProviders = new Set();
@@ -2847,7 +3232,11 @@ function completeAiRecommendations(
     // Fill in missing cloud providers as fallback_models
     for (const [provider, modelMap] of cloudProviders) {
       if (presentProviders.has(provider)) continue;
-      const fallback = bestCloudRecommendationForProvider(provider, modelMap);
+      const fallback = bestCloudRecommendationForProvider(
+        provider,
+        modelMap,
+        cloudLookup,
+      );
       if (fallback) {
         rec.fallback_models.push(fallback);
         presentProviders.add(provider);
@@ -3459,11 +3848,16 @@ async function main() {
         paidProbesDetails = results;
         return sortedPaid.filter((m) => {
           const provider = m.split("/")[0];
-          return isProviderAvailable(provider);
+          return (
+            isProviderAvailable(provider) &&
+            hasEnoughContextForPanel(m, initialCloudLookup)
+          );
         });
       });
     } else {
-      paidProbesPromise = Promise.resolve(sortedPaid);
+      paidProbesPromise = Promise.resolve(
+        filterUsablePanelModels(sortedPaid, initialCloudLookup),
+      );
     }
   }
 
@@ -3711,27 +4105,33 @@ async function main() {
   let panelModels = null;
   if (!aiResult) {
     if (explicitModels.length > 0) {
-      panelModels = explicitModels;
+      panelModels = filterPanelModelsForContext(explicitModels, cloudLookup);
+      panelModels = includeDetectedCliPanelModels(panelModels, config);
       console.log(
         `  \u2713 Using ${panelModels.length} explicitly selected model(s): ${panelModels.join(", ")}\n`,
       );
+      printCliPanelDisclosure(panelModels, "Explicit");
     } else if (!autoYes && !dryRun && !localOnly) {
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
       const picked = await pickPanelModels(config, availablePaid);
       if (picked && picked.length > 0) {
-        panelModels = picked;
+        panelModels = filterPanelModelsForContext(picked, cloudLookup);
+        panelModels = includeDetectedCliPanelModels(panelModels, config);
         console.log(`  \u2713 Using ${panelModels.length} selected model(s)\n`);
+        printCliPanelDisclosure(panelModels, "Selected");
       }
     }
 
     if (!panelModels) {
       const configuredModels = configuredPanelModels(config);
       if (configuredModels.length > 0) {
-        panelModels = configuredModels;
+        panelModels = filterPanelModelsForContext(configuredModels, cloudLookup);
+        panelModels = includeDetectedCliPanelModels(panelModels, config);
         console.log(
           `  \u2713 Using ${panelModels.length} configured panel model(s): ${panelModels.join(", ")}\n`,
         );
+        printCliPanelDisclosure(panelModels, "Configured");
       }
     }
 
@@ -3750,7 +4150,11 @@ async function main() {
         );
         const usePaid = answer.trim().toLowerCase() !== "f";
         if (usePaid) {
-          panelModels = availablePaid.slice(0, 5);
+          panelModels = selectPreferredPanelModels(
+            availablePaid,
+            config,
+            cloudLookup,
+          );
         } else {
           panelModels = defaultPanelModels(config, cloudLookup);
           opencodeOnlyMode = true;
@@ -3783,7 +4187,11 @@ async function main() {
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
       if (availablePaid.length > 0 && !localOnly) {
-        panelModels = availablePaid.slice(0, 5);
+        panelModels = selectPreferredPanelModels(
+          availablePaid,
+          config,
+          cloudLookup,
+        );
       } else {
         panelModels = defaultPanelModels(config, cloudLookup);
         opencodeOnlyMode = true;
