@@ -5,7 +5,7 @@ https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
 A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file with fallback models enabled by default for each agent. 
 
 > [!TIP]
-> This tool generates a *point-in-time snapshot*. It does not replace dynamic API routing, it will not prevent real-time API quota rejections, and it certainly cannot measure "hallucinations" between one provider and another. Use this tool to get your initial bearings, then let OmO handle the actual execution.
+> This tool generates a *point-in-time snapshot*. It does not replace dynamic API routing, it will not prevent real-time API quota rejections. Use this tool to get your initial bearings, or to recalibrate when you add more AI models to opencode, then let OmO handle the actual execution.
 
 ## Quick Start
 
@@ -64,7 +64,7 @@ evaluating -
     Detects your GPU architecture and available VRAM to shortlist local models (GGUFs, Ollama, vLLM) that will actually fit on your machine without OOM (Out of Memory) errors.
 * **Static cost & context comparisons** 
 
-    Provides a quick, point-in-time stack-rank of cloud providers (OpenRouter, Groq, Together AI) based on their advertised pricing and context windows so you can decide who gets your credit card.
+    Provides a quick, point-in-time stack-rank of models from AI cloud providers you have authenticated in opencode (via `opencode auth login`), so decision fatigue around ordering models from best to worst for each OmO agent and purpose is completed with AI-driven reasoning.
 * **Initial template generation** 
 
     Spits out a baseline `oh-my-openagent.jsonc` file with valid syntax, saving you from manually typing out provider endpoints on day one.
@@ -73,7 +73,7 @@ evaluating -
 
 ## 🚫 What this tool can't do, and why you shouldn't overuse it
 
-* **It does NOT handle rate limits or empty quotas**
+* **It does NOT handle rate limits or empty quotas over time**
   
     If a provider runs out of credits mid-task, running a CLI tool is the wrong way to fix it. Set up the `fallback_models: []` array natively in OmO, or use a unified router like LiteLLM/OpenRouter to handle 402/429 errors automatically at runtime.
 * **It does NOT provide real-time speed benchmarks**
@@ -93,6 +93,6 @@ evaluating -
 2. **You are starting completely from scratch** 
 
     and want a quick CLI wizard to generate your first valid JSON config file.
-3. **A massive new model family drops** 
+3. **A restructuring of available providers** 
 
-    (e.g., Llama 4) and you want to quickly see the static pricing comparison across different cloud hosts.
+    If there are changes to what AI providers you're using, and need to add or remove models from your configuration.
