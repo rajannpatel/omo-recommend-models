@@ -75,7 +75,7 @@ evaluating -
 
 * **It does NOT handle rate limits or empty quotas**
   
-    If a provider runs out of credits mid-task, running a CLI tool is the wrong way to fix it. Set up the `fallbacks: []` array natively in OmO, or use a unified router like LiteLLM/OpenRouter to handle 402/429 errors automatically at runtime.
+    If a provider runs out of credits mid-task, running a CLI tool is the wrong way to fix it. Set up the `fallback_models: []` array natively in OmO, or use a unified router like LiteLLM/OpenRouter to handle 402/429 errors automatically at runtime.
 * **It does NOT provide real-time speed benchmarks**
   
     Cloud API latency fluctuates by the minute based on network traffic. The "fastest" provider at 9:00 AM might be the slowest by 9:05 AM. Do not rely on this tool for real-time latency routing.
