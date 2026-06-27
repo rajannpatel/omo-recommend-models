@@ -1,45 +1,41 @@
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+# omo-recommend-models
 
-**omo-recommend-models** is an intelligent CLI utility that evaluates your GPU and uses AI to recommend the absolute best local and cloud-hosted AI models for your computer. Local models are automatically used in opencode *only* when they will outperform cloud AI providers.
+A CLI utility that profiles your GPU and recommends the most optimized local and cloud AI models for OpenCode and OmO. Run this whenever a new model drops to instantly optimize your configuration for performance and price, completely eliminating the need to manually calculate VRAM footprints or benchmark throughput.
 
-Best Practice
-If you know a specific provider is completely out of credits (e.g., your OpenAI prepaid balance is dry), it is highly recommended to either temporarily remove that API key from your OpenCode config or manually edit your oh-my-openagent.jsonc to strip those models out.
+## Quick Start
 
-If you leave a quota-constrained model as an agent's primary choice, OmO will waste a second or two on every single task hitting the provider's rejection wall before successfully rolling over to the fallback model.
+Run the utility in your project directory to evaluate your hardware and update your model registry:
 
-Whenever a new model drops, don't spend hours reading benchmarks, calculating quantized VRAM footprints, or guessing your token-per-second throughput. Run `omo-recommend-models` and optimize your configuration for performance and price, across both cloud and local AI models you have chosen to use in opencode, instantly.
+```bash
+npx omo-recommend-models
+```
 
-https://github.com/code-yeongyu/oh-my-openagent/issues/1538#:~:text=Bug%20Description,the%20oh%2Dmy%2Dopencode.
-There is a known, heavily documented issue where OpenCode's UI actively fights OmO's configuration for the primary orchestrator (Sisyphus).  
+## Why Run This?
 
-Because Sisyphus is your main agent, OpenCode frequently forces its uiSelectedModel (whatever you have selected in the top-right corner of the OpenCode UI) down into Sisyphus, unconditionally overriding the `model` and `fallback_models` you wrote in your JSON file.
+* **Smart Routing:** 
 
-The fix for this: Make sure your configuration file is saved in the project root at `.opencode/oh-my-openagent.jsonc` rather than just the global `~/.config/` directory. Project-level configs force the model resolution pipeline to respect your JSON file over the UI's default state.
+Local models are automatically used in OpenCode *only* when they will outperform your cloud AI providers.
+* **Hardware Profiling:** 
 
+Detects your GPU architecture and VRAM to shortlist the best models that fit locally.
+* **Cross-Provider Evaluation:** 
 
+Stack-ranks local execution (Ollama, vLLM, Llama.cpp) against cloud providers (Anyscale, Together AI, Groq, OpenRouter) based on cost, speed, context window, and hallucination-free outputs.
 
----
+## Crucial Configuration Rules
 
-## ✨ Features
+To ensure OmO runs without friction or delays, you must structure your configuration properly:
 
-- **⚡ AI driven hardware profiling:** Detects GPU architecture and VRAM and aligns it with available models. Shortlists the absolute best models for a variety of tasks and purposes, that can fit completely into VRAM.
-- **📊 Cross-provider evaluation:** Compares local execution (via Ollama, vLLM, Llama.cpp) against state-of-the-art cloud providers (Anyscale, Together AI, Groq, OpenRouter) based on cost, speed, and context window requirements. Stack ranks AI models based on a combination of speed, accuracy, completeness, and hallucination-free outputs.
-- **🔄 Rolling model registry:** Keeps track of the latest model releases (Llama 3, Mistral, Phi-3, Gemma) and maps them to your hardware whenever you run `omo-recommend-models`.
+* **Bypass Sisyphus UI Overrides:** 
 
----
+OpenCode's UI actively fights your OmO configuration for the primary orchestrator (Sisyphus), unconditionally overriding your fallback models. **The fix:** Save your configuration file at the project level (`.opencode/oh-my-openagent.jsonc`) instead of the global directory (`~/.config/`). Project-level configs force the pipeline to respect your JSON file over the UI.
+* **Strip Dead API Keys:** 
 
-## 🚀 Quick Start
+If a provider is out of credits, OmO will waste time hitting a rejection wall on every single task before triggering the fallback model. Manually remove empty-quota keys from your OpenCode config or strip those models from `oh-my-openagent.jsonc`.
 
-### Installation
+## Panel Model Configuration
 
-download everything and
-chmod +x omo-recommend-models
-
-npx coming soon...
-
-## Panel model configuration
-
-Add persistent panel preferences to `oh-my-openagent.jsonc` under `omo`:
+Add persistent panel preferences to your `oh-my-openagent.jsonc` file under the `omo` key:
 
 ```jsonc
 "omo": {
@@ -59,4 +55,4 @@ Add persistent panel preferences to `oh-my-openagent.jsonc` under `omo`:
 }
 ```
 
-`--model` flags still override `omo.panel_models` for one run.
+> **Note:** Passing `--model` flags via CLI will override `omo.panel_models` for a single run.
