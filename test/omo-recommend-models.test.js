@@ -81,10 +81,23 @@ function writePanelCache(homeDir, result, options = {}) {
   return cachePath;
 }
 
-function writeFakeOpencode(binDir, aiResponse = defaultAiResponse) {
+function writeFakeOpencode(binDir, aiResponse = defaultAiResponse, providerCache = defaultProviderCache()) {
   const fakePath = path.join(binDir, "opencode");
   const fakeJsPath = path.join(binDir, "opencode.js");
   const responseJson = JSON.stringify(aiResponse);
+  const extraModels = [];
+  if (providerCache && providerCache.models) {
+    for (const [providerId, modelsArray] of Object.entries(providerCache.models)) {
+      for (const m of modelsArray) {
+        const id = typeof m === "string" ? m : m.id;
+        const ref = `${providerId}/${id}`;
+        if (ref !== "opencode/big-pickle" && ref !== "opencode/north-mini-code-free") {
+          extraModels.push(ref);
+        }
+      }
+    }
+  }
+  const extraModelsStr = extraModels.map((m) => `  process.stdout.write(${JSON.stringify(m)} + NL);`).join("\n");
   const fake = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -97,6 +110,7 @@ if (promptPath && args[0] === "run") fs.appendFileSync(promptPath, args[args.len
 if (args[0] === "models") {
   process.stdout.write("opencode/big-pickle" + NL);
   process.stdout.write("opencode/north-mini-code-free" + NL);
+${extraModelsStr}
 } else if (args[0] === "run") {
   const model = args[args.indexOf("--model") + 1];
   const pure = args.includes("--pure");
@@ -201,7 +215,7 @@ function createHarness(t, options = {}) {
   const configPath = writeConfig(homeDir, options.config || defaultConfig());
   writeProviderCache(homeDir, options.providerCache || defaultProviderCache());
   if (options.localCatalog) writeLocalCatalog(homeDir, options.localCatalog);
-  writeFakeOpencode(binDir, options.aiResponse || defaultAiResponse);
+  writeFakeOpencode(binDir, options.aiResponse || defaultAiResponse, options.providerCache || defaultProviderCache());
   if (options.ollamaModels) writeFakeOllama(binDir, options.ollamaModels);
   if (options.gpu) writeFakeGpu(binDir, options.gpu);
   if (options.validator) writePathFakeValidator(binDir, options.validator);
@@ -448,7 +462,7 @@ test("stale panel cache is rejected before recommendations are displayed", async
   assert.equal(result.code, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /Loaded cached panel result/);
   assert.doesNotMatch(result.stdout, /local\/oversized:70b/);
-  assert.match(result.stdout, /opencode\/big-pickle/);
+  assert.match(result.stdout, /opencode: big-pickle/);
 });
 
 test("panel picker label and recommendation preview uses bulleted format", async (t) => {
@@ -471,11 +485,11 @@ test("panel picker label and recommendation preview uses bulleted format", async
     },
   });
 
-  const result = await runCli(harness.env, "\nn\n", ["--cloud-only"]);
+  const result = await runCli(harness.env, ["\n", "\n", "n\n"], ["--cloud-only"]);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /agent-model recommendations from:/);
+  assert.match(result.stdout, /AI Analysis/);
   assert.doesNotMatch(result.stdout, /Available opencode models/);
   assert.match(result.stdout, /agents\.sisyphus/);
   assert.match(result.stdout, /fallback_models:/);
@@ -704,10 +718,207 @@ test("recommendation preview displays prevModel when newModel is null", async (t
     },
   });
 
-  const result = await runCli(harness.env, "\nn\n", ["--cloud-only"]);
+  const result = await runCli(harness.env, ["\n", "\n", "n\n"], ["--cloud-only"]);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /model: opencode\/big-pickle/);
 });
+
+test("async probe of paid models and selecting paid in prompt", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "quota-exceeded-prov": [{ id: "model-1", family: "model-family" }],
+        "good-prov": [{ id: "model-2", family: "model-family" }]
+      }
+    },
+    aiResponse: {
+      analysis: "paid recommendation",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "good-prov", model: "model-2", reason: "good model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  // Verify that the prompt listed the good model but NOT the quota exceeded one
+  assert.match(result.stdout, /Available paid models/);
+  assert.match(result.stdout, /good-prov: model-2/);
+  assert.doesNotMatch(result.stdout, /Available paid models:[\s\S]+quota-exceeded-prov/);
+});
+
+test("panel cache exact match loads without displaying 'This run would query'", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    panelCache: {
+      timestamp: Date.now(),
+      models: ["opencode/nemotron-3-ultra-free"],
+      result: {
+        analysis: "cached recommendation",
+        cloudRecommendations: [
+          {
+            name: "sisyphus",
+            type: "agent",
+            profile: "orchestrator",
+            model: { provider: "opencode", model: "nemotron-3-ultra-free", reason: "cached" },
+            routing: [],
+            fallback_models: [],
+          },
+        ],
+        localModels: { decisions: [], placements: [] },
+      },
+    },
+  });
+
+  const result = await runCli(harness.env, ["y\n", "n\n"], ["--cloud-only", "--model", "opencode/nemotron-3-ultra-free"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Loaded cached panel result/);
+  assert.doesNotMatch(result.stdout, /This run would query/);
+});
+
+test("panel cache declined displays 'This run would query' when running fresh", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    panelCache: {
+      timestamp: Date.now(),
+      models: ["opencode/nemotron-3-ultra-free"],
+      result: {
+        analysis: "cached recommendation",
+        cloudRecommendations: [
+          {
+            name: "sisyphus",
+            type: "agent",
+            profile: "orchestrator",
+            model: { provider: "opencode", model: "nemotron-3-ultra-free", reason: "cached" },
+            routing: [],
+            fallback_models: [],
+          },
+        ],
+        localModels: { decisions: [], placements: [] },
+      },
+    },
+  });
+
+  const result = await runCli(harness.env, ["n\n", "\n", "n\n"], ["--cloud-only", "--model", "opencode/nemotron-3-ultra-free"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /This run would query:/);
+  assert.match(result.stdout, /opencode/);
+});
+
+test("no panel models available falls back to free models and prints quota-exceeded details", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "opencode": [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+          { id: "nemotron-3-ultra-free", family: "opencode-nemotron", context_length: 32000 }
+        ],
+        "quota-exceeded-prov": [{ id: "model-1", family: "model-family" }]
+      }
+    },
+    aiResponse: {
+      analysis: "free fallback recommendations",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "nemotron-3-ultra-free", reason: "free model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    }
+  });
+
+  const result = await runCli(harness.env, ["y\n"], ["--cloud-only", "--model", "quota-exceeded-prov/model-1"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, `code: ${result.code}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  assert.match(result.stdout, /No panel models are available \(all are quota-restricted or rate-limited\)\. Limiting analysis/);
+  assert.match(result.stdout, /Failed model details \/ errors:/);
+  assert.match(result.stdout, /quota-exceeded-prov.*model-1/);
+  assert.match(result.stdout, /quota-exceeded/);
+  assert.match(result.stdout, /Falling back to free opencode models\.\.\./);
+  assert.match(result.stdout, /model: opencode\/nemotron-3-ultra-free/);
+});
+
+test("early cache prompt allows repurposing cached results", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    panelCache: {
+      timestamp: Date.now(),
+      models: ["opencode/north-mini-code-free"],
+      result: {
+        analysis: "cached recommendation results",
+        cloudRecommendations: [
+          {
+            name: "sisyphus",
+            type: "agent",
+            profile: "orchestrator",
+            model: { provider: "opencode", model: "north-mini-code-free", reason: "from cache" },
+            routing: [],
+            fallback_models: [],
+          },
+        ],
+        localModels: { decisions: [], placements: [] },
+      }
+    }
+  });
+
+  const result = await runCli(harness.env, ["y\n"], ["--cloud-only"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Cached panel result:/);
+  assert.match(result.stdout, /Use cached\? \(y\/N\)/);
+  assert.match(result.stdout, /Loaded cached panel result\./);
+  assert.match(result.stdout, /model: opencode\/north-mini-code-free/);
+});
+
+test("interactive model picker awaits probes and lists only available models", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "opencode": [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 }
+        ],
+        "good-prov": [{ id: "model-paid", family: "model-family" }],
+        "quota-exceeded-prov": [{ id: "model-bad", family: "model-family" }]
+      }
+    }
+  });
+
+  const result = await runCli(harness.env, ["a\n", "p\n", "n\n"], ["--cloud-only"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+
+  assert.match(result.stdout, /Evaluate these models for opencode OMO agent roles:/);
+  assert.match(result.stdout, /good-prov\/model-paid/);
+  assert.doesNotMatch(result.stdout, /quota-exceeded-prov\/model-bad/);
+});
+
+
 
