@@ -3092,7 +3092,8 @@ async function main() {
   const args = process.argv.slice(2);
   const doRebalance = args.includes("--rebalance");
   const dryRun = args.includes("--dry-run");
-  const autoYes = args.includes("-y");
+  const interactive = args.includes("--interactive");
+  const autoYes = args.includes("-y") || !interactive;
   const cloudOnly = args.includes("--cloud-only");
   const localOnly = args.includes("--local-only");
 
@@ -3467,7 +3468,14 @@ async function main() {
 
     // Fallback to default if still not set (e.g., if autoYes, dryRun, or localOnly skipped prompt)
     if (!panelModels) {
-      panelModels = defaultPanelModels(config);
+      await ensureProbesAwaited();
+      const availablePaid = await paidProbesPromise;
+      if (availablePaid.length > 0 && !localOnly) {
+        panelModels = availablePaid.slice(0, 5);
+      } else {
+        panelModels = defaultPanelModels(config);
+        opencodeOnlyMode = true;
+      }
     }
   }
   // (Old cache checking block removed)

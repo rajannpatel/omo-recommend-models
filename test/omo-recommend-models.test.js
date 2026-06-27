@@ -236,8 +236,12 @@ function createHarness(t, options = {}) {
 }
 
 function runCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
+  const finalArgs = [...args];
+  if (!finalArgs.includes("-y") && !finalArgs.includes("--interactive")) {
+    finalArgs.push("--interactive");
+  }
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], {
+    const child = spawn(process.execPath, [scriptPath, ...finalArgs], {
       cwd: env.HOME,
       env,
       stdio: ["pipe", "pipe", "pipe"],
