@@ -87,7 +87,7 @@ function writePanelCache(homeDir, result, options = {}) {
   return cachePath;
 }
 
-function writeFakeOpencode(binDir, aiResponse = defaultAiResponse, providerCache = defaultProviderCache()) {
+function writeFakeOpencode(binDir, aiResponse = defaultAiResponse, providerCache = defaultProviderCache(), options = {}) {
   const fakePath = path.join(binDir, "opencode");
   const fakeJsPath = path.join(binDir, "opencode.js");
   const responseJson = JSON.stringify(aiResponse);
@@ -114,6 +114,9 @@ const NL = String.fromCharCode(10);
 if (logPath) fs.appendFileSync(logPath, JSON.stringify(args) + NL);
 if (promptPath && args[0] === "run") fs.appendFileSync(promptPath, args[args.length - 1] + NL + "---PROMPT---" + NL);
 if (args[0] === "models") {
+  if (${Boolean(options.emptyPlainModelsOnly)} && !args.includes("--pure")) {
+    process.exit(0);
+  }
   process.stdout.write("opencode/big-pickle" + NL);
   process.stdout.write("opencode/north-mini-code-free" + NL);
 ${extraModelsStr}
@@ -227,7 +230,12 @@ function createHarness(t, options = {}) {
   writeProviderCache(homeDir, options.providerCache || defaultProviderCache());
   if (options.localCatalog) writeLocalCatalog(homeDir, options.localCatalog);
   if (options.opencode !== false) {
-    writeFakeOpencode(binDir, options.aiResponse || defaultAiResponse, options.providerCache || defaultProviderCache());
+    writeFakeOpencode(
+      binDir,
+      options.aiResponse || defaultAiResponse,
+      options.providerCache || defaultProviderCache(),
+      options.opencodeOptions || {},
+    );
   }
   if (options.ollamaModels) writeFakeOllama(binDir, options.ollamaModels);
   if (options.gpu) writeFakeGpu(binDir, options.gpu);
@@ -384,6 +392,34 @@ test("AI panel runs recommendation models in pure text mode", async (t) => {
     .filter((args) => args[0] === "run");
   assert.ok(runCalls.length >= 2);
   assert.ok(runCalls.every((args) => args.includes("--pure")));
+});
+
+test("default panel falls back to opencode models from provider cache", async (t) => {
+  const harness = createHarness(t, {
+    opencodeOptions: { emptyPlainModelsOnly: true },
+    aiResponse: {
+      analysis: "cache backed recommendations",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle", reason: "cache fallback" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, "\n");
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /This run would query:/);
+  assert.match(result.stdout, /opencode: big-pickle/);
+  assert.doesNotMatch(result.stdout + result.stderr, /No free models available/);
 });
 
 test("normalizes Ollama recommendations to local model refs with startup progress", async (t) => {

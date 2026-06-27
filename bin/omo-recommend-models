@@ -584,16 +584,34 @@ function selectedPanelRequiresOpencode(config, explicitModels) {
   return true;
 }
 
-function defaultPanelModels(config) {
-  const allFree = sortPanelModelRefs(discoverFreeModels(), config);
+function opencodePanelModelsFromLookup(cloudLookup) {
+  const modelMap = cloudLookup?.byId?.opencode;
+  if (!modelMap) return [];
+  const ids =
+    modelMap instanceof Map
+      ? [...modelMap.keys()]
+      : Object.keys(modelMap);
+  return ids
+    .map((id) => String(id || "").trim())
+    .filter(Boolean)
+    .map((id) => (id.startsWith("opencode/") ? id : `opencode/${id}`));
+}
+
+function defaultPanelModels(config, cloudLookup = null) {
+  const discovered = discoverFreeModels();
+  const refs =
+    discovered.length > 0
+      ? discovered
+      : opencodePanelModelsFromLookup(cloudLookup);
+  const allFree = sortPanelModelRefs(refs, config);
   const MAX_PANEL = 5;
   return allFree.length > MAX_PANEL ? allFree.slice(0, MAX_PANEL) : allFree;
 }
 
-function plannedPanelModels(config, panelModels) {
+function plannedPanelModels(config, panelModels, cloudLookup = null) {
   if (panelModels && panelModels.length > 0) return panelModels;
   const configured = configuredPanelModels(config);
-  return configured.length > 0 ? configured : defaultPanelModels(config);
+  return configured.length > 0 ? configured : defaultPanelModels(config, cloudLookup);
 }
 
 function createProgress(label) {
@@ -2340,7 +2358,7 @@ async function runPanelAndSelect(
   if (panelModels && panelModels.length > 0) {
     models = panelModels;
   } else {
-    models = defaultPanelModels(config);
+    models = defaultPanelModels(config, cloudLookup);
     if (models.length === 0) throw new Error("No free models available");
   }
 
@@ -2370,7 +2388,7 @@ async function runPanelAndSelect(
     }
 
     console.log("\nFalling back to free opencode models...");
-    const freeModels = defaultPanelModels(config);
+    const freeModels = defaultPanelModels(config, cloudLookup);
     if (freeModels.length === 0) {
       throw new Error("No free models available");
     }
@@ -3692,7 +3710,7 @@ async function main() {
         if (usePaid) {
           panelModels = availablePaid.slice(0, 5);
         } else {
-          panelModels = defaultPanelModels(config);
+          panelModels = defaultPanelModels(config, cloudLookup);
           opencodeOnlyMode = true;
         }
       } else {
@@ -3709,7 +3727,7 @@ async function main() {
           }
         }
         console.log("\n  Falling back to free opencode models.\n");
-        panelModels = defaultPanelModels(config);
+        panelModels = defaultPanelModels(config, cloudLookup);
         opencodeOnlyMode = true;
       }
     }
@@ -3721,7 +3739,7 @@ async function main() {
       if (availablePaid.length > 0 && !localOnly) {
         panelModels = availablePaid.slice(0, 5);
       } else {
-        panelModels = defaultPanelModels(config);
+        panelModels = defaultPanelModels(config, cloudLookup);
         opencodeOnlyMode = true;
       }
     }
