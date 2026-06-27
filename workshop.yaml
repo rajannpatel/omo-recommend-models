@@ -47,7 +47,7 @@ actions:
       exec "$@"
     fi
 
-    export PS1="(workshop:snap-pi-hole) \w \$ "
+    export PS1="(workshop:omo-recommend-models) \w \$ "
     echo "Workshop shell for omo-recommend-models"
     echo "Project commands run here inside the Workshop LXD container."
     exec bash --noprofile --norc -i
