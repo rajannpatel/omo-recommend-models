@@ -25,6 +25,7 @@ const defaultAiResponse = {
 function defaultConfig(overrides = {}) {
   return {
     $schema: "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",
+    runtime_fallback: true,
     agents: {
       sisyphus: {
         model_quality: "high",
@@ -54,7 +55,7 @@ function writeJson(filePath, data) {
 }
 
 function writeConfig(homeDir, config = defaultConfig()) {
-  const configPath = path.join(homeDir, ".config", "opencode", "oh-my-openagent.jsonc");
+  const configPath = path.join(homeDir, ".opencode", "oh-my-openagent.jsonc");
   writeJson(configPath, config);
   return configPath;
 }
@@ -209,7 +210,7 @@ function createHarness(t, options = {}) {
   const binDir = path.join(tempDir, "bin");
   const homeDir = path.join(tempDir, "home");
   fs.mkdirSync(binDir, { recursive: true });
-  fs.mkdirSync(path.join(homeDir, ".config", "opencode"), { recursive: true });
+  fs.mkdirSync(path.join(homeDir, ".opencode"), { recursive: true });
   fs.mkdirSync(path.join(homeDir, ".cache", "oh-my-opencode"), { recursive: true });
 
   const configPath = writeConfig(homeDir, options.config || defaultConfig());
@@ -237,7 +238,7 @@ function createHarness(t, options = {}) {
 function runCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath, ...args], {
-      cwd: repoRoot,
+      cwd: env.HOME,
       env,
       stdio: ["pipe", "pipe", "pipe"],
     });
