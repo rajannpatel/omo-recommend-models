@@ -1,9 +1,14 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { spawn } = require("node:child_process");
-const test = require("node:test");
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const repoRoot = path.resolve(__dirname, "..");
 const scriptPath = path.join(repoRoot, "bin", "omo-recommend-models");
@@ -274,6 +279,34 @@ function runCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs
   });
 }
 
+function runCliRaw(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: env.HOME,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, 500).unref();
+    }, timeoutMs);
+    child.stdout.on("data", (data) => { stdout += data.toString(); });
+    child.stderr.on("data", (data) => { stderr += data.toString(); });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal, stdout, stderr, timedOut });
+    });
+    child.stdin.end(input);
+  });
+}
+
 function runValidator(env, args = [], timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [validatorPath, ...args], {
@@ -537,6 +570,36 @@ test("canonical local output is local slash refs and local models never enter ro
   assert.deepEqual(written.agents.sisyphus.routing || [], []);
   assert.ok((written.agents.sisyphus.fallback_models || []).includes("local/tinyllama:1.1b"));
   assert.doesNotMatch(fs.readFileSync(harness.configPath, "utf8"), /ollama\/tinyllama:1\.1b/);
+});
+
+test("non-interactive runs preview by default and do not write config without yes", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model: "opencode/north-mini-code-free" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    aiResponse: {
+      analysis: "non-interactive preview",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle", reason: "preview only" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+  const original = fs.readFileSync(harness.configPath, "utf8");
+
+  const result = await runCliRaw(harness.env, "", ["--cloud-only", "--model", "opencode/big-pickle"]);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Non-interactive environment detected; previewing changes only/);
+  assert.match(result.stdout, /Apply: omo-recommend-models/);
+  assert.equal(fs.readFileSync(harness.configPath, "utf8"), original);
 });
 
 test("validator direct CLI supports help, config validation, malformed input, and safe fix", async (t) => {
@@ -924,6 +987,5 @@ test("interactive model picker awaits probes and lists only available models", a
   assert.match(result.stdout, /good-prov\/model-paid/);
   assert.doesNotMatch(result.stdout, /quota-exceeded-prov\/model-bad/);
 });
-
 
 

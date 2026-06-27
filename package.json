@@ -1,0 +1,30 @@
+{
+  "name": "omo-recommend-models",
+  "version": "1.0.0",
+  "description": "Consolidated AI-powered model recommendation CLI for OpenCode OMO agent configurations",
+  "type": "module",
+  "bin": {
+    "omo-recommend-models": "./bin/omo-recommend-models"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rajannpatel/omo-recommend-models.git"
+  },
+  "files": [
+    "bin/omo-recommend-models",
+    "bin/omo-validate-config",
+    "lib"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "mri": "^1.2.0",
+    "picocolors": "^1.0.1"
+  }
+}

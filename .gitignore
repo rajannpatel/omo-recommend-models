@@ -39,3 +39,7 @@ workshop.local.*
 .omo/
 *recommendation.json
 *_recommendation.json
+
+# NPM packaging / npx validation
+*.tgz
+

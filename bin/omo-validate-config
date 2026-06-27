@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-"use strict";
-
-const fs = require("fs");
-const path = require("path");
-const {
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import {
   CONFIG_PATH,
   CACHE_DIR,
   jsoncParse,
@@ -12,7 +12,11 @@ const {
   resolveProvider,
   buildRichModelLookup,
   discoverLocalModels,
-} = require("../lib/omo-shared");
+} from '../lib/omo-shared.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 
 const DEFAULT_SCHEMA =
   "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json";

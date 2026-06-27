@@ -16,16 +16,20 @@
  *   omo-recommend-models --local-only         # skip cloud model discovery
  */
 
-const fs = require("fs");
-const path = require("path");
-const readline = require("readline");
-const { execSync, spawn } = require("child_process");
-const os = require("os");
-const {
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import os from "node:os";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import mri from "mri";
+import pc from "picocolors";
+import {
   CONFIG_PATH,
   BACKUP_PATH,
-  confirm,
-  promptUser,
+  confirm as plainConfirm,
+  promptUser as plainPromptUser,
   pickFreeModel,
   discoverFreeModels,
   callOpencodeChat,
@@ -37,7 +41,105 @@ const {
   normalizeLocalModelName,
   formatModelRef,
   buildRichModelLookup,
-} = require("../lib/omo-shared");
+} from "../lib/omo-shared.js";
+import {
+  backupConfig,
+  writeConfigWithValidation,
+} from "../lib/recommend/apply.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const activeChildren = new Set();
+let clack = null;
+let useClackPrompts = false;
+let debugMode = false;
+
+function registerChild(child) {
+  activeChildren.add(child);
+  child.once("exit", () => activeChildren.delete(child));
+  child.once("error", () => activeChildren.delete(child));
+  return child;
+}
+
+function spawnTracked(command, args, options) {
+  return registerChild(spawn(command, args, options));
+}
+
+function terminateActiveChildren() {
+  const children = [...activeChildren].filter(
+    (child) => child.exitCode === null && child.signalCode === null,
+  );
+  for (const child of children) {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+  }
+  setTimeout(() => {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }
+    }
+    process.exit(1);
+  }, 2000).unref();
+}
+
+function installSignalHandlers() {
+  let handlingSignal = false;
+  const handler = (signal) => {
+    if (handlingSignal) return;
+    handlingSignal = true;
+    process.stderr.write(`\n${signal} received; terminating subprocesses...\n`);
+    terminateActiveChildren();
+  };
+  process.once("SIGINT", handler);
+  process.once("SIGTERM", handler);
+}
+
+async function configureTerminalUi(enabled) {
+  useClackPrompts = Boolean(enabled);
+  if (!useClackPrompts) return;
+  try {
+    clack = await import("@clack/prompts");
+  } catch {
+    clack = null;
+  }
+}
+
+async function confirm(question) {
+  if (useClackPrompts && clack?.confirm) {
+    const answer = await clack.confirm({
+      message: question.replace(/\s*\([^)]+\)\s*$/, "").trim(),
+      initialValue: false,
+    });
+    return answer === true;
+  }
+  return plainConfirm(question);
+}
+
+async function promptUser(question) {
+  if (useClackPrompts && clack?.text) {
+    const answer = await clack.text({ message: question.trim() });
+    return typeof answer === "string" ? answer.trim() : "";
+  }
+  return plainPromptUser(question);
+}
+
+function commandExists(binary) {
+  if (!binary || binary.includes(path.sep)) return "";
+  for (const dir of String(process.env.PATH || "").split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, binary);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  return "";
+}
 
 // =========================================================================
 // Model scoring constants (from omo-recommend-cloud)
@@ -460,6 +562,21 @@ function plannedPanelModels(config, panelModels) {
 }
 
 function createProgress(label) {
+  if (useClackPrompts && clack?.spinner) {
+    const spinner = clack.spinner();
+    spinner.start(label);
+    return {
+      update(message) {
+        spinner.message(`${label}: ${message}`);
+      },
+      done(message = "done") {
+        spinner.stop(`${label}: ${message}`);
+      },
+      skip(message) {
+        spinner.stop(`${label}: ${message}`);
+      },
+    };
+  }
   const start = Date.now();
   process.stdout.write(`  ⏳ ${label}...`);
   return {
@@ -689,7 +806,7 @@ function probeModel(modelRef) {
 
   const promise = new Promise((resolve) => {
     const tempDir = os.tmpdir();
-    const child = spawn(
+    const child = spawnTracked(
       "opencode",
       [
         "run",
@@ -862,10 +979,10 @@ function finalizeFallbackModels(primary, fallbackModels) {
 
 function execCurl(url, accept) {
   try {
-    const cmd = accept
-      ? `curl -s --max-time 8 -H ${JSON.stringify(accept)} ${JSON.stringify(url)}`
-      : `curl -s --max-time 8 ${JSON.stringify(url)}`;
-    return execSync(cmd, {
+    const args = ["-s", "--max-time", "8"];
+    if (accept) args.push("-H", accept);
+    args.push(url);
+    return execFileSync("curl", args, {
       encoding: "utf-8",
       timeout: 15000,
       env: { ...process.env, TERM: "dumb" },
@@ -957,11 +1074,16 @@ function discoverModels(forceRefresh = false, progress = null) {
 function detectGPU() {
   const dumbEnv = { ...process.env, TERM: "dumb" };
   try {
-    const out = execSync(
-      "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null",
+    const out = execFileSync(
+      "nvidia-smi",
+      [
+        "--query-gpu=name,memory.total",
+        "--format=csv,noheader,nounits",
+      ],
       {
         encoding: "utf-8",
         timeout: 5000,
+        stdio: ["ignore", "pipe", "pipe"],
         env: dumbEnv,
       },
     );
@@ -975,9 +1097,10 @@ function detectGPU() {
     };
   } catch (_) {}
   try {
-    const out = execSync("ollama list 2>/dev/null", {
+    const out = execFileSync("ollama", ["list"], {
       encoding: "utf-8",
       timeout: 5000,
+      stdio: ["ignore", "pipe", "pipe"],
       env: dumbEnv,
     });
     if (out.includes("NAME"))
@@ -997,31 +1120,23 @@ function detectOllama() {
     version = null,
     models = [];
   const dumbEnv = { ...process.env, TERM: "dumb" };
-  try {
-    const bin = execSync(
-      "which ollama 2>/dev/null || command -v ollama 2>/dev/null",
-      {
-        encoding: "utf-8",
-        timeout: 3000,
-        env: dumbEnv,
-      },
-    );
-    installed = bin.trim().length > 0;
-  } catch (_) {}
+  installed = commandExists("ollama").length > 0;
   if (installed) {
     try {
       version = (
-        execSync("ollama --version 2>/dev/null", {
+        execFileSync("ollama", ["--version"], {
           encoding: "utf-8",
           timeout: 3000,
+          stdio: ["ignore", "pipe", "pipe"],
           env: dumbEnv,
         }) || ""
       ).trim();
     } catch (_) {}
     try {
-      const list = execSync("ollama list 2>/dev/null", {
+      const list = execFileSync("ollama", ["list"], {
         encoding: "utf-8",
         timeout: 5000,
+        stdio: ["ignore", "pipe", "pipe"],
         env: dumbEnv,
       });
       running = list.includes("NAME");
@@ -1381,14 +1496,14 @@ function discoverCliModels(config = {}) {
   }
 
   function renderCliCommand(command, prompt) {
-    const promptArg = JSON.stringify(prompt);
     if (Array.isArray(command)) {
       const rendered = command.map((part) =>
         String(part).replaceAll("{prompt}", prompt),
       );
       if (!rendered.some((part) => part.includes(prompt))) rendered.push(prompt);
-      return rendered.map((part) => JSON.stringify(part)).join(" ");
+      return rendered;
     }
+    const promptArg = JSON.stringify(prompt);
     const raw = String(command || "").trim();
     if (!raw) return "";
     return raw.includes("{prompt}")
@@ -1408,15 +1523,22 @@ function discoverCliModels(config = {}) {
       binary: "codex",
       ref: "cli/codex",
       command: (prompt) =>
-        'codex run --model "opencode/big-pickle" --preset json --dangerously-skip-permissions 2>/dev/null ' +
-        JSON.stringify(prompt),
+        [
+          "codex",
+          "run",
+          "--model",
+          "opencode/big-pickle",
+          "--preset",
+          "json",
+          "--dangerously-skip-permissions",
+          prompt,
+        ],
     },
     {
       binary: "agy",
       ref: "cli/agy",
       command: (prompt) =>
-        "agy --print --dangerously-skip-permissions 2>/dev/null " +
-        JSON.stringify(prompt),
+        ["agy", "--print", "--dangerously-skip-permissions", prompt],
     },
   ];
 
@@ -1437,11 +1559,7 @@ function discoverCliModels(config = {}) {
   // CLI agents on PATH can participate alongside provider-backed models.
   for (const adapter of cliAdapters) {
     try {
-      const which = execSync(`which ${adapter.binary}`, {
-        encoding: "utf-8",
-        timeout: 3000,
-        stdio: ["ignore", "pipe", "pipe"],
-      }).trim();
+      const which = commandExists(adapter.binary);
       if (which) {
         agents.push({
           ref: adapter.ref,
@@ -1449,12 +1567,16 @@ function discoverCliModels(config = {}) {
             try {
               const cmd = adapter.command(prompt);
               if (!cmd) return null;
-              const raw = execSync(cmd, {
+              const options = {
                 encoding: "utf-8",
                 timeout: 120000,
                 maxBuffer: 1024 * 1024,
                 stdio: ["ignore", "pipe", "pipe"],
-              });
+                env: { ...process.env, TERM: "dumb" },
+              };
+              const raw = Array.isArray(cmd)
+                ? execFileSync(cmd[0], cmd.slice(1), options)
+                : execSync(cmd, { ...options, shell: "/bin/sh" });
               return parseCliJson(raw);
             } catch {}
             return null;
@@ -1468,11 +1590,7 @@ function discoverCliModels(config = {}) {
 
   // Try workshop discovery script if available
   try {
-    const workshop = execSync("which tools/workshop-shell", {
-      encoding: "utf-8",
-      timeout: 3000,
-      stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
+    const workshop = commandExists("tools/workshop-shell");
     if (workshop) {
       // Discovery would parse the script output and add more agents
     }
@@ -1565,7 +1683,7 @@ function extractOpencodeText(stdout) {
 function callPanelModelAsync(model, prompt, signal, statusRef) {
   return new Promise((resolve) => {
     const tempDir = os.tmpdir();
-    const child = spawn(
+    const child = spawnTracked(
       "opencode",
       [
         "run",
@@ -2870,7 +2988,10 @@ async function applyLocalPlacements(
 function pullModel(modelName) {
   // Primary: ollama CLI
   try {
-    execSync(`ollama pull ${modelName}`, { stdio: "inherit", timeout: 600000 });
+    execFileSync("ollama", ["pull", modelName], {
+      stdio: "inherit",
+      timeout: 600000,
+    });
     return true;
   } catch (e) {
     console.error(`  \u2716 Failed to pull ${modelName}: ${e.message}`);
@@ -2882,8 +3003,18 @@ function pullModel(modelName) {
       `  \u2192 Retrying via curl API at http://localhost:11434/api/pull ...`,
     );
     const body = JSON.stringify({ name: modelName });
-    execSync(
-      `curl -N -X POST http://localhost:11434/api/pull -d '${body}' --max-time 600`,
+    execFileSync(
+      "curl",
+      [
+        "-N",
+        "-X",
+        "POST",
+        "http://localhost:11434/api/pull",
+        "-d",
+        body,
+        "--max-time",
+        "600",
+      ],
       { stdio: "inherit", timeout: 610000 },
     );
     console.log(`  \u2713 ${modelName} pulled via curl`);
@@ -2951,7 +3082,10 @@ async function installAndUninstallModels(decisions, ollama, autoYes) {
     }
     if (autoYes) {
       try {
-        execSync(`ollama rm ${d.name}`, { stdio: "inherit", timeout: 60000 });
+        execFileSync("ollama", ["rm", d.name], {
+          stdio: "inherit",
+          timeout: 60000,
+        });
         console.log(`  \u2713 ${d.name} removed`);
       } catch (e) {
         console.error(`  \u2716 Failed to remove ${d.name}: ${e.message}`);
@@ -2960,7 +3094,10 @@ async function installAndUninstallModels(decisions, ollama, autoYes) {
       const ok = await confirm(`  Uninstall ${d.name}? [y/N] `);
       if (ok) {
         try {
-          execSync(`ollama rm ${d.name}`, { stdio: "inherit", timeout: 60000 });
+          execFileSync("ollama", ["rm", d.name], {
+            stdio: "inherit",
+            timeout: 60000,
+          });
           console.log(`  \u2713 ${d.name} removed`);
         } catch (e) {
           console.error(`  \u2716 Failed to remove ${d.name}: ${e.message}`);
@@ -2994,7 +3131,10 @@ async function offerUninstallOrphans(decisions, ollama, autoYes) {
   if (autoYes) {
     for (const m of orphans) {
       try {
-        execSync(`ollama rm ${m.name}`, { stdio: "inherit", timeout: 60000 });
+        execFileSync("ollama", ["rm", m.name], {
+          stdio: "inherit",
+          timeout: 60000,
+        });
         console.log(`  \u2713 ${m.name} removed`);
       } catch (e) {
         console.error(`  \u2716 Failed to remove ${m.name}: ${e.message}`);
@@ -3012,7 +3152,10 @@ async function offerUninstallOrphans(decisions, ollama, autoYes) {
   }
   for (const m of orphans) {
     try {
-      execSync(`ollama rm ${m.name}`, { stdio: "inherit", timeout: 60000 });
+      execFileSync("ollama", ["rm", m.name], {
+        stdio: "inherit",
+        timeout: 60000,
+      });
       console.log(`  \u2713 ${m.name} removed`);
     } catch (e) {
       console.error(`  \u2716 Failed to remove ${m.name}: ${e.message}`);
@@ -3089,20 +3232,51 @@ function showRebalance(config, richLookup, aliases, localModelNames) {
 // =========================================================================
 
 async function main() {
-  const args = process.argv.slice(2);
-  const doRebalance = args.includes("--rebalance");
-  const dryRun = args.includes("--dry-run");
-  const interactive = args.includes("--interactive");
-  const autoYes = args.includes("-y") || !interactive;
-  const cloudOnly = args.includes("--cloud-only");
-  const localOnly = args.includes("--local-only");
+  installSignalHandlers();
+  const parsedArgs = mri(process.argv.slice(2), {
+    boolean: [
+      "yes",
+      "rebalance",
+      "dry-run",
+      "cloud-only",
+      "local-only",
+      "debug",
+      "interactive",
+    ],
+    string: ["model"],
+    alias: { y: "yes" },
+    default: {
+      yes: false,
+      rebalance: false,
+      "dry-run": false,
+      "cloud-only": false,
+      "local-only": false,
+      debug: false,
+      interactive: false,
+    },
+  });
+  const doRebalance = parsedArgs.rebalance;
+  debugMode = parsedArgs.debug;
+  const realTty =
+    Boolean(process.stdout.isTTY) &&
+    process.env.TERM !== "dumb" &&
+    process.env.CI !== "true";
+  const interactive = parsedArgs.interactive || realTty;
+  const dryRunFallback = !interactive && !parsedArgs.yes;
+  const dryRun = parsedArgs["dry-run"] || dryRunFallback;
+  const autoYes = !dryRun && (parsedArgs.yes || (!parsedArgs.interactive && realTty));
+  const cloudOnly = parsedArgs["cloud-only"];
+  const localOnly = parsedArgs["local-only"];
+  const explicitModels = [parsedArgs.model]
+    .flat()
+    .filter((model) => typeof model === "string" && model.trim())
+    .map((model) => model.trim());
 
-  // Collect explicit --model selections (repeatable)
-  const explicitModels = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--model" && i + 1 < args.length) {
-      explicitModels.push(args[++i]);
-    }
+  await configureTerminalUi(realTty);
+  if (dryRunFallback) {
+    console.log(
+      "  • Non-interactive environment detected; previewing changes only. Pass --yes to apply.",
+    );
   }
 
   const config = loadConfig();
@@ -3173,20 +3347,34 @@ async function main() {
     });
   }
 
-  // GPU / Ollama detection (needed for both --rebalance and local recommendations)
-  const gpuProgress = createProgress("Checking GPU");
-  const gpu = detectGPU();
-  gpuProgress.done(gpu.label);
+  // GPU / Ollama detection is local integration and is skipped in cloud-only mode.
+  let gpu;
+  let ollama;
+  if (cloudOnly) {
+    createProgress("Checking GPU").skip("skipped by --cloud-only");
+    createProgress("Checking Ollama").skip("skipped by --cloud-only");
+    gpu = {
+      hasGpu: false,
+      name: "",
+      label: "Not checked (--cloud-only)",
+      vramGb: 0,
+    };
+    ollama = { installed: false, running: false, version: null, models: [] };
+  } else {
+    const gpuProgress = createProgress("Checking GPU");
+    gpu = detectGPU();
+    gpuProgress.done(gpu.label);
 
-  const ollamaProgress = createProgress("Checking Ollama");
-  const ollama = detectOllama();
-  ollamaProgress.done(
-    ollama.running
-      ? `${ollama.models.length} installed model(s)`
-      : ollama.installed
-        ? "installed, not running"
-        : "not installed",
-  );
+    const ollamaProgress = createProgress("Checking Ollama");
+    ollama = detectOllama();
+    ollamaProgress.done(
+      ollama.running
+        ? `${ollama.models.length} installed model(s)`
+        : ollama.installed
+          ? "installed, not running"
+          : "not installed",
+    );
+  }
 
   // Local model catalog (skip if cloud-only, or if Ollama not installed)
   let allLocalModels = [];
@@ -3247,23 +3435,22 @@ async function main() {
         return;
       }
     }
-    if (fs.existsSync(CONFIG_PATH)) {
-      fs.copyFileSync(CONFIG_PATH, BACKUP_PATH);
+    if (backupConfig(CONFIG_PATH, BACKUP_PATH)) {
       console.log(`  \u2713 Backup saved to ${BACKUP_PATH}`);
     }
-    const rewritten = JSON.stringify(config, null, 2) + "\n";
-    fs.writeFileSync(CONFIG_PATH, rewritten, "utf-8");
     console.log(`  Backup: ${BACKUP_PATH}`);
-    console.log(`\u2705 ${rebalanceChanges.length} section(s) restructured.\n`);
     try {
-      execSync(
-        `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(__dirname, "omo-validate-config"))} --fix`,
-        { stdio: "inherit", env: { ...process.env, TERM: "dumb" } },
-      );
+      writeConfigWithValidation({
+        config,
+        configPath: CONFIG_PATH,
+        backupPath: BACKUP_PATH,
+        validatorPath: path.join(__dirname, "omo-validate-config"),
+        validateStdio: "inherit",
+      });
+      console.log(`\u2705 ${rebalanceChanges.length} section(s) restructured.\n`);
     } catch (validationErr) {
       console.error(`\n\u2716 Validation FAILED.`);
       if (fs.existsSync(BACKUP_PATH)) {
-        fs.copyFileSync(BACKUP_PATH, CONFIG_PATH);
         console.log(
           `  \u2713 Reverted to previous config (backup at ${BACKUP_PATH})`,
         );
@@ -3574,8 +3761,7 @@ async function main() {
   }
 
   // Backup
-  if (fs.existsSync(CONFIG_PATH)) {
-    fs.copyFileSync(CONFIG_PATH, BACKUP_PATH);
+  if (backupConfig(CONFIG_PATH, BACKUP_PATH)) {
     console.log(`  \u2713 Backup saved to ${BACKUP_PATH}`);
   }
 
@@ -3637,23 +3823,20 @@ async function main() {
     }
   }
 
-  // Write config
-  const rewritten = JSON.stringify(config, null, 2) + "\n";
-  fs.writeFileSync(CONFIG_PATH, rewritten, "utf-8");
   console.log(`  Backup: ${BACKUP_PATH}`);
   const totalChanges = totalCloud + totalLocal;
-  console.log(`\u2705 ${totalChanges} section(s) updated.\n`);
 
   // Validate — roll back on failure
   console.log("\u2192 Validating changes...");
   try {
-    execSync(
-      `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(__dirname, "omo-validate-config"))} --fix`,
-      {
-        stdio: ["inherit", "inherit", "pipe"],
-        env: { ...process.env, TERM: "dumb" },
-      },
-    );
+    writeConfigWithValidation({
+      config,
+      configPath: CONFIG_PATH,
+      backupPath: BACKUP_PATH,
+      validatorPath: path.join(__dirname, "omo-validate-config"),
+      validateStdio: ["inherit", "inherit", "pipe"],
+    });
+    console.log(`\u2705 ${totalChanges} section(s) updated.\n`);
   } catch (validationErr) {
     const stderr = validationErr.stderr ? validationErr.stderr.toString() : "";
     console.error(`\n\u2716 Validation FAILED.`);
@@ -3664,7 +3847,6 @@ async function main() {
     }
     // Restore from the backup taken before applying
     if (fs.existsSync(BACKUP_PATH)) {
-      fs.copyFileSync(BACKUP_PATH, CONFIG_PATH);
       console.log(
         `  \u2713 Reverted to previous config (backup at ${BACKUP_PATH})`,
       );
@@ -3690,7 +3872,10 @@ async function main() {
 main()
   .then(() => process.exit(0))
   .catch((e) => {
-    console.error(`\n\u2716 ${e.message}`);
+    console.error(`\n${pc.red("\u2716 " + (e.message || String(e)))}`);
+    if (debugMode && e.stack) {
+      console.error(e.stack);
+    }
     // Show execSync stderr if available (validation failures, subprocess errors, etc.)
     if (e.stderr) {
       const stderrText =
