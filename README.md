@@ -1,8 +1,11 @@
 https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
 
-# omo-recommend-models
+# 🛠️ omo-recommend-models
 
-A CLI utility that profiles your GPU and recommends the most optimized local and cloud AI models for OpenCode and OmO. Run this whenever a new model drops to instantly optimize your configuration for performance and price, completely eliminating the need to manually calculate VRAM footprints or benchmark throughput.
+A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file. 
+
+> [!WARNING] **Disclaimer** 
+> This tool generates a *point-in-time snapshot*. It does not replace dynamic API routing, it will not prevent real-time API quota rejections, and it certainly cannot measure "hallucinations" between one provider and another. Use this tool to get your initial bearings, then let OmO handle the actual execution.
 
 ## Quick Start
 
@@ -54,18 +57,42 @@ evaluating -
 
 ---
 
-## Why Run This?
+## 🎯 What This Actually Does
 
-* **Smart Routing** 
+* **Hardware Profiling (The Best Feature)** 
 
-    Local models are automatically used in OpenCode *only* when they will outperform your cloud AI providers.
-* **Hardware Profiling** 
+    Detects your GPU architecture and available VRAM to shortlist local models (GGUFs, Ollama, vLLM) that will actually fit on your machine without OOM (Out of Memory) errors.
+* **Static Cost & Context Comparisons** 
 
-    Detects your GPU architecture and VRAM to shortlist the best models that fit locally.
-* **Cross-Provider Evaluation** 
+    Provides a quick, point-in-time stack-rank of cloud providers (OpenRouter, Groq, Together AI) based on their advertised pricing and context windows so you can decide who gets your credit card.
+* **Initial Template Generation** 
 
-    Stack-ranks local execution (Ollama, vLLM, Llama.cpp) against cloud providers (Anyscale, Together AI, Groq, OpenRouter) based on cost, speed, context window, and hallucination-free outputs.
+    Spits out a baseline `oh-my-openagent.jsonc` file with valid syntax, saving you from manually typing out provider endpoints on day one.
 
-## Remove delays while running opencode
+---
 
-    If a provider is out of credits, OmO will waste time hitting a rejection wall on every single task before triggering the fallback model. Manually removing empty-quota keys from your OpenCode config, or stripping those models from `oh-my-openagent.jsonc` is a nuisance. Run omo-recommed-models to automatically get the latest configuration optimized for performance and price, through your preferred AI providers.
+## 🚫 What this tool can't do, and why you shouldn't overuse it
+
+* **It Does NOT Handle Rate Limits or Empty Quotas**
+  
+    If a provider runs out of credits mid-task, running a CLI tool is the wrong way to fix it. Set up the `fallbacks: []` array natively in OmO, or use a unified router like LiteLLM/OpenRouter to handle 402/429 errors automatically at runtime.
+* **It Does NOT Provide Real-Time Speed Benchmarks**
+  
+    Cloud API latency fluctuates by the minute based on network traffic. The "fastest" provider at 9:00 AM might be the slowest by 9:05 AM. Do not rely on this tool for real-time latency routing.
+* **It Does NOT Evaluate "Hallucinations"**
+  
+    Model intelligence and hallucination rates require massive, standardized evaluation datasets (like MMLU) to quantify. This lightweight CLI cannot programmatically test a model's accuracy. 
+
+---
+
+## 🚦 When Should You Actually Run This?
+
+1. **You just bought a new GPU** 
+
+    and want to know exactly how large of a local model you can cram into your VRAM.
+2. **You are starting completely from scratch** 
+
+    and want a quick CLI wizard to generate your first valid JSON config file.
+3. **A massive new model family drops** 
+
+    (e.g., Llama 4) and you want to quickly see the static pricing comparison across different cloud hosts.
