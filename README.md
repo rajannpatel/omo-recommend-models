@@ -66,7 +66,7 @@ evaluating -
 
 ## Crucial Configuration Rules
 
-    To ensure OmO runs without friction or delays, you must structure your configuration properly:
+To ensure OmO runs without friction or delays, you must structure your configuration properly:
 
 * **Bypass Sisyphus UI Overrides** 
 
