@@ -2,7 +2,7 @@ https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
 
 # 🛠️ omo-recommend-models
 
-A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file. 
+A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file with fallback models enabled by default for each agent. 
 
 > [!TIP]
 > This tool generates a *point-in-time snapshot*. It does not replace dynamic API routing, it will not prevent real-time API quota rejections, and it certainly cannot measure "hallucinations" between one provider and another. Use this tool to get your initial bearings, then let OmO handle the actual execution.
