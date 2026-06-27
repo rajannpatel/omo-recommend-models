@@ -64,38 +64,15 @@ evaluating -
 
     Stack-ranks local execution (Ollama, vLLM, Llama.cpp) against cloud providers (Anyscale, Together AI, Groq, OpenRouter) based on cost, speed, context window, and hallucination-free outputs.
 
-## Crucial Configuration Rules
-
-To ensure OmO runs without friction or delays, you must structure your configuration properly:
+## Problems omo-recommend-models solves
 
 * **Bypass Sisyphus UI Overrides** 
 
-    OpenCode's UI actively fights your OmO configuration for the primary orchestrator (Sisyphus), unconditionally overriding your fallback models. **The fix:** Save your configuration file at the project level (`.opencode/oh-my-openagent.jsonc`) instead of the global directory (`~/.config/`). Project-level configs force the pipeline to respect your JSON file over the UI.
-* **Strip Dead API Keys** 
+    OpenCode's UI actively fights your OmO configuration for the primary orchestrator (Sisyphus), unconditionally overriding your fallback models. This is a known bug which will not be fixed in opencode. 
+    
+    **The fix:** 
+    
+    omo-recommend-models saves your configuration file at the project level (`.opencode/oh-my-openagent.jsonc`) instead of the global directory (`~/.config/`). Project-level configs force the pipeline to respect your JSON file over the UI. Add `.opencode` directory to your `.gitignore` file to prevent pushing your configuration to the repository.
+* **Remove delays while running opencode** 
 
-    If a provider is out of credits, OmO will waste time hitting a rejection wall on every single task before triggering the fallback model. Manually remove empty-quota keys from your OpenCode config or strip those models from `oh-my-openagent.jsonc`.
-
-## Panel Model Configuration
-
-Add persistent AI recommendation preferences to your `oh-my-openagent.jsonc` file under the `omo` key:
-
-```jsonc
-"omo": {
-  "panel_model_order": "opencode-first", // or "score"
-  "panel_models": [
-    "opencode/nemotron-3-ultra-free",
-    "opencode/mimo-v2.5-free",
-    "cli/codex",
-    "cli/my-agent"
-  ],
-  "panel_cli_agents": {
-    "my-agent": {
-      "binary": "my-agent",
-      "command": "my-agent --json --prompt {prompt}"
-    }
-  }
-}
-```
-
-> [!NOTE]
-> Passing `--model` flags via CLI will override `omo.panel_models` for a single run.
+    If a provider is out of credits, OmO will waste time hitting a rejection wall on every single task before triggering the fallback model. Manually removing empty-quota keys from your OpenCode config, or stripping those models from `oh-my-openagent.jsonc` is a nuisance. Run omo-recommed-models to automatically get the latest configuration optimized for performance and price, through your preferred AI providers.
