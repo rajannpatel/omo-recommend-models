@@ -148,11 +148,16 @@ Interactive elements will dynamically adapt to the environment:
 *   **NPX Verification Protocol**:
     1. Run `npm pack --dry-run` to inspect files listed in package boundaries.
     2. Create local package file: `npm pack` (generates `omo-recommend-models-*.tgz`).
-    3. Execute the local package via `npx`:
+    3. Execute dependency-free package smoke checks via `npx`; these must not require `opencode`, Ollama, GPU tooling, or a populated model cache:
        ```bash
-       npx -y ./omo-recommend-models-1.0.0.tgz --dry-run --cloud-only --yes
+       npx -y -p ./omo-recommend-models-1.0.0.tgz omo-recommend-models --help
+       npx -y -p ./omo-recommend-models-1.0.0.tgz omo-recommend-models --version
        ```
-    4. Confirm permission modes of `bin/omo-recommend-models` and sibling script `bin/omo-validate-config` retain execute permissions (`mode 755`).
+    4. Execute the full AI recommendation integration check only on systems where the OpenCode CLI (`opencode`) is installed and on `PATH`:
+       ```bash
+       npx -y -p ./omo-recommend-models-1.0.0.tgz omo-recommend-models --dry-run --cloud-only --yes
+       ```
+    5. Confirm permission modes of `bin/omo-recommend-models` and sibling script `bin/omo-validate-config` retain execute permissions (`mode 755`).
 
 ---
 

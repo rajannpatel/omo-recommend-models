@@ -217,11 +217,18 @@ function createHarness(t, options = {}) {
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(path.join(homeDir, ".opencode"), { recursive: true });
   fs.mkdirSync(path.join(homeDir, ".cache", "oh-my-opencode"), { recursive: true });
+  fs.writeFileSync(
+    path.join(binDir, "node"),
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`,
+    { mode: 0o755 },
+  );
 
   const configPath = writeConfig(homeDir, options.config || defaultConfig());
   writeProviderCache(homeDir, options.providerCache || defaultProviderCache());
   if (options.localCatalog) writeLocalCatalog(homeDir, options.localCatalog);
-  writeFakeOpencode(binDir, options.aiResponse || defaultAiResponse, options.providerCache || defaultProviderCache());
+  if (options.opencode !== false) {
+    writeFakeOpencode(binDir, options.aiResponse || defaultAiResponse, options.providerCache || defaultProviderCache());
+  }
   if (options.ollamaModels) writeFakeOllama(binDir, options.ollamaModels);
   if (options.gpu) writeFakeGpu(binDir, options.gpu);
   if (options.validator) writePathFakeValidator(binDir, options.validator);
@@ -343,6 +350,19 @@ test("captured recommendation output fixture is a JSON array of records", () => 
   assert.equal(typeof parsed[0], "object");
   assert.ok(parsed[0] && typeof parsed[0].name === "string");
   assert.ok(parsed[0] && typeof parsed[0].type === "string");
+});
+
+test("missing opencode exits early with actionable dependency error", async (t) => {
+  const harness = createHarness(t, { opencode: false });
+
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only", "--yes"]);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /OpenCode CLI \(`opencode`\) is required/);
+  assert.match(result.stderr, /No config changes were made/);
+  assert.doesNotMatch(result.stdout + result.stderr, /No free models available/);
+  assert.doesNotMatch(result.stdout + result.stderr, /getAccessibleModels failed/);
 });
 
 test("AI panel runs recommendation models in pure text mode", async (t) => {
@@ -987,5 +1007,3 @@ test("interactive model picker awaits probes and lists only available models", a
   assert.match(result.stdout, /good-prov\/model-paid/);
   assert.doesNotMatch(result.stdout, /quota-exceeded-prov\/model-bad/);
 });
-
-
