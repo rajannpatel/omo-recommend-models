@@ -18,6 +18,7 @@ visual-engineering-recommendation.json
 .DS_Store
 
 # Local scratchpads and AI configs
+.opencode/
 .claude/
 !.claude/
 .claude/*
@@ -34,3 +35,7 @@ visual-engineering-recommendation.json
 .workshop.lock
 workshop.local.*
 
+# OMO workspace configurations & recommendations
+.omo/
+*recommendation.json
+*_recommendation.json
