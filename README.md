@@ -35,7 +35,7 @@ If a provider is out of credits, OmO will waste time hitting a rejection wall on
 
 ## Panel Model Configuration
 
-Add persistent panel preferences to your `oh-my-openagent.jsonc` file under the `omo` key:
+Add persistent AI recommendation preferences to your `oh-my-openagent.jsonc` file under the `omo` key:
 
 ```jsonc
 "omo": {
