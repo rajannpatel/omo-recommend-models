@@ -23,18 +23,12 @@ $ npx omo-recommend-models --cloud-only --yes
 ◇  Loading cloud provider cache: 5 provider(s)
   ✓ Model picture: 5 cloud provider(s), 0 installed local model(s)
 
-│
-◇  Verifying paid models availability: done
-
 This run would query:
   1. opencode: nemotron-3-ultra-free
                mimo-v2.5-free
                deepseek-v4-flash-free
                big-pickle
                north-mini-code-free
-
-│
-◇  Verifying panel models availability: 5 of 5 model(s) available
 
 == AI Panel: 21 agents, 5 panel models ==
    Models:
@@ -96,3 +90,81 @@ evaluating -
 3. **A restructuring of available providers** 
 
     If there are changes to what AI providers you're using, and need to add or remove models from your configuration.
+
+---
+
+## How model selection works
+
+`omo-recommend-models` builds a point-in-time recommendation. It does not continuously test providers, benchmark latency, or route around live outages. The important parts are:
+
+* **Cloud inventory**
+
+    The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for the AI panel.
+* **Local inventory**
+
+    If local discovery is enabled, the tool checks GPU/VRAM and Ollama, then only presents local models that fit the detected hardware. Local models are never placed in `routing`; they are used as primaries only when the recommendation explicitly chooses a local-first role, or as `fallback_models` for offline/quota-limited operation.
+* **Rate-limit and quota filtering**
+
+    Rate-limited and quota-restricted providers are included by default. Passing `--exclude-rate-limited` filters providers after a 429/rate-limit probe. Passing `--exclude-quota-restricted` filters providers after quota, billing, credit, auth, or payment errors. Without those flags, the tool does not exclude an entire provider, family, or model just because a probe failed.
+* **Panel model selection**
+
+    If you pass `--model provider/model`, those models are used for the AI panel. Otherwise the CLI can use configured `omo.panel_models`, selected paid models, or the default top free OpenCode panel models.
+
+## The AI suitability prompt
+
+For each agent or category, every panel model receives a compact prompt built from the current config entry, cloud candidates, fitting local models, and hardware facts. The prompt asks for strict JSON, not prose. In simplified form, it looks like this:
+
+```text
+OUTPUT: valid JSON only. No markdown.
+
+SCHEMA:
+{
+  "name": str,
+  "type": "agent|category",
+  "profile": str,
+  "model": {"provider": str, "model": str, "reason": str},
+  "routing": [{"provider": str, "model": str, "reason": str}],
+  "fallback_models": [{"provider": str, "model": str, "reason": str}]
+}
+
+AGENT: <name> | <agent-or-category> | <quality> | cur=<current-model> | <description>
+HW: GPU=<label> VRAM=<total>GB usable=<usable>GB
+
+CLOUD (<count>):
+<provider/model score>
+
+LOCAL (<count> fit VRAM):
+<model name, VRAM, score, installed status>
+
+FIELDS: model=primary routing=delegation_pool fallback_models=retry_pool
+RULES:
+- Sort routing and fallback_models by score descending.
+- Paid/cloud as primary for reasoning/code agents.
+- Free model as fallback unless utility agent (explore/librarian/quick).
+- Prefer highest-scored cloud model for primary unless GPU requirements force local.
+- For utility agents, use highest-scored free cloud as primary.
+- For other agents, prioritize highest-scored paid/cloud model.
+- Fill routing with next highest-scored cloud models.
+- Set three fallback_models when possible:
+  * Slot 1 closely matches the primary model in intelligence and token window.
+  * Slot 2 is a highly available, fast mid-tier model.
+  * Slot 3 is the cheapest, highest-rate-limit model.
+- Remove duplicate entries across model, routing, and fallback_models.
+- No local models in routing arrays.
+```
+
+The real prompt also includes a few concrete examples so the panel models keep `model`, `routing`, and `fallback_models` distinct.
+
+## How `fallback_models` are determined
+
+The AI panel votes independently for each agent/category. The CLI then:
+
+1. Picks the primary `model` by majority vote when possible, or by plurality when no model has a majority.
+2. Adds `routing` entries that received majority support.
+3. Adds `fallback_models` entries that received majority support.
+4. Fills in missing cloud providers with each provider's highest-scored model, so a config is not dominated by one provider.
+5. Adds the best fitting local model as a fallback when local discovery finds a useful installed model.
+6. Deduplicates `fallback_models` and removes anything that duplicates the primary model.
+7. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
+
+In `--rebalance` mode, the AI panel is skipped. The CLI instead builds tier chains directly from model scores and restructures existing `model` plus `fallback_models` assignments around those score tiers.

@@ -131,6 +131,10 @@ ${extraModelsStr}
     process.stdout.write("Payment Required: {\\\"error\\\": \\\"quota exceeded\\\"}" + NL);
     process.exit(1);
   }
+  if (model && model.includes("rate-limited")) {
+    process.stderr.write("Error: rate limit exceeded (HTTP 429)" + NL);
+    process.exit(1);
+  }
   function emitText(text) {
     process.stdout.write(JSON.stringify({ type: "text", part: { text } }) + NL);
   }
@@ -753,7 +757,7 @@ test("validator rollback integration uses sibling validator and restores config"
   assert.equal(fs.readFileSync(rebalance.configPath, "utf8"), rebalanceOriginal);
 });
 
-test("quota exceeded errors block recommendations for that provider", async (t) => {
+test("quota exceeded errors do not block recommendations by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -785,10 +789,49 @@ test("quota exceeded errors block recommendations for that provider", async (t) 
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
+  assert.equal(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+});
+
+test("quota exceeded errors block recommendations with exclude flag", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "quota-exceeded-prov": [{ id: "model-1", family: "model-family" }],
+        "good-prov": [{ id: "model-2", family: "model-family" }]
+      }
+    },
+    aiResponse: {
+      analysis: "quota test",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "quota-exceeded-prov", model: "model-1", reason: "quota model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(
+    harness.env,
+    "",
+    ["-y", "--cloud-only", "--exclude-quota-restricted", "--model", "quota-exceeded-prov/model-1"],
+  );
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+
+  const configText = fs.readFileSync(harness.configPath, "utf8");
+  const configJson = JSON.parse(configText);
   assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
 });
 
-test("quota exceeded errors in stdout block recommendations for that provider", async (t) => {
+test("quota exceeded errors in stdout do not block recommendations by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -820,7 +863,7 @@ test("quota exceeded errors in stdout block recommendations for that provider", 
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  assert.notEqual(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
+  assert.equal(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
 });
 
 test("recommendation preview displays prevModel when newModel is null", async (t) => {
@@ -877,10 +920,42 @@ test("async probe of paid models and selecting paid in prompt", async (t) => {
 
   const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only"]);
   assert.equal(result.timedOut, false, result.stderr);
-  // Verify that the prompt listed the good model but NOT the quota exceeded one
+  assert.match(result.stdout, /Paid models/);
+  assert.match(result.stdout, /good-prov: model-2/);
+  assert.match(result.stdout, /quota-exceeded-prov: model-1/);
+});
+
+test("exclude rate limited flag removes rate-limited providers from paid picker", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "rate-limited-prov": [{ id: "rate-limited-model", family: "model-family" }],
+        "good-prov": [{ id: "model-2", family: "model-family" }]
+      }
+    },
+    aiResponse: {
+      analysis: "paid recommendation",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "good-prov", model: "model-2", reason: "good model" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only", "--exclude-rate-limited"]);
+  assert.equal(result.timedOut, false, result.stderr);
   assert.match(result.stdout, /Available paid models/);
   assert.match(result.stdout, /good-prov: model-2/);
-  assert.doesNotMatch(result.stdout, /Available paid models:[\s\S]+quota-exceeded-prov/);
+  assert.doesNotMatch(result.stdout, /Available paid models:[\s\S]+rate-limited-prov/);
 });
 
 test("panel cache exact match loads without displaying 'This run would query'", async (t) => {
@@ -945,7 +1020,7 @@ test("panel cache declined displays 'This run would query' when running fresh", 
   assert.match(result.stdout, /opencode/);
 });
 
-test("no panel models available falls back to free models and prints quota-exceeded details", async (t) => {
+test("exclude quota flag falls back to free models and prints quota-exceeded details", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -975,7 +1050,11 @@ test("no panel models available falls back to free models and prints quota-excee
     }
   });
 
-  const result = await runCli(harness.env, ["y\n"], ["--cloud-only", "--model", "quota-exceeded-prov/model-1"]);
+  const result = await runCli(
+    harness.env,
+    ["y\n"],
+    ["--cloud-only", "--exclude-quota-restricted", "--model", "quota-exceeded-prov/model-1"],
+  );
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, `code: ${result.code}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
   assert.match(result.stdout, /No panel models are available \(all are quota-restricted or rate-limited\)\. Limiting analysis/);
@@ -1019,7 +1098,7 @@ test("early cache prompt allows repurposing cached results", async (t) => {
   assert.match(result.stdout, /model: opencode\/north-mini-code-free/);
 });
 
-test("interactive model picker awaits probes and lists only available models", async (t) => {
+test("interactive model picker lists paid models without availability probes by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -1041,5 +1120,5 @@ test("interactive model picker awaits probes and lists only available models", a
 
   assert.match(result.stdout, /Evaluate these models for opencode OMO agent roles:/);
   assert.match(result.stdout, /good-prov\/model-paid/);
-  assert.doesNotMatch(result.stdout, /quota-exceeded-prov\/model-bad/);
+  assert.match(result.stdout, /quota-exceeded-prov\/model-bad/);
 });

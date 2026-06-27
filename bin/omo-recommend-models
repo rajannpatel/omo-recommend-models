@@ -69,6 +69,8 @@ function usage() {
     "      --cloud-only   Skip GPU, Ollama, and local model discovery",
     "      --local-only   Skip cloud model discovery and API checks",
     "      --model <ref>  Use an explicit AI panel model; may be repeated",
+    "      --exclude-rate-limited       Exclude providers after rate-limit errors",
+    "      --exclude-quota-restricted   Exclude providers after quota/billing errors",
     "      --interactive  Force interactive prompts in non-TTY environments",
     "      --debug        Print stack traces for errors",
     "  -h, --help         Show this help",
@@ -198,6 +200,10 @@ const FREE_PROVIDERS = ["opencode", LOCAL_PROVIDER];
 const QUALITY_TIERS = ["reasoning", "balanced", "fast"];
 const quotaExceededProviders = new Set();
 const providerAvailability = new Map();
+const providerExclusionOptions = {
+  quotaRestricted: false,
+  rateLimited: false,
+};
 let opencodeOnlyMode = false;
 const providerProbePromises = new Map();
 
@@ -817,11 +823,29 @@ function isProviderAvailable(provider, now = Date.now()) {
     return true;
   if (opencodeOnlyMode && provider !== "opencode")
     return false;
-  if (quotaExceededProviders.has(provider)) return false;
+  if (
+    providerExclusionOptions.quotaRestricted &&
+    quotaExceededProviders.has(provider)
+  )
+    return false;
   const state = providerAvailability.get(provider);
   if (!state) return true;
-  if (state.creditExhausted) return false;
-  return !(state.rateLimitedUntil && state.rateLimitedUntil > now);
+  if (providerExclusionOptions.quotaRestricted && state.creditExhausted)
+    return false;
+  if (
+    providerExclusionOptions.rateLimited &&
+    state.rateLimitedUntil &&
+    state.rateLimitedUntil > now
+  )
+    return false;
+  return true;
+}
+
+function shouldProbeProviderAvailability() {
+  return (
+    providerExclusionOptions.quotaRestricted ||
+    providerExclusionOptions.rateLimited
+  );
 }
 
 function markProviderCreditExhausted(provider, reason) {
@@ -921,6 +945,19 @@ function probeModel(modelRef) {
       const lower = rawError.toLowerCase();
 
       if (
+        lower.includes("429") ||
+        lower.includes("rate limit") ||
+        lower.includes("rate_limit") ||
+        lower.includes("too many requests") ||
+        lower.includes("too_many_requests")
+      ) {
+        const delay = parseRetryAfterSeconds(rawError) || 15;
+        markProviderRateLimited(provider, delay, "rate-limited");
+        resolve({ ok: false, reason: "rate-limited", errorOutput: rawError });
+        return;
+      }
+
+      if (
         code === 402 ||
         lower.includes("402") ||
         lower.includes("payment required") ||
@@ -952,19 +989,6 @@ function probeModel(modelRef) {
       ) {
         markProviderCreditExhausted(provider, "quota-exceeded");
         resolve({ ok: false, reason: "quota-exceeded", errorOutput: rawError });
-        return;
-      }
-
-      if (
-        lower.includes("429") ||
-        lower.includes("rate limit") ||
-        lower.includes("rate_limit") ||
-        lower.includes("too many requests") ||
-        lower.includes("too_many_requests")
-      ) {
-        const delay = parseRetryAfterSeconds(rawError) || 15;
-        markProviderRateLimited(provider, delay, "rate-limited");
-        resolve({ ok: false, reason: "rate-limited", errorOutput: rawError });
         return;
       }
 
@@ -2362,51 +2386,52 @@ async function runPanelAndSelect(
     if (models.length === 0) throw new Error("No free models available");
   }
 
-  // Pre-flight check the models we are going to use in the panel
-  let availableModels = [];
-  const progress = createProgress("Verifying panel models availability");
-  let probeResults = [];
-  try {
-    probeResults = await Promise.all(models.map((m) => probeModel(m)));
-    availableModels = models.filter((m, i) => probeResults[i].ok);
-    progress.done(`${availableModels.length} of ${models.length} model(s) available`);
-  } catch (err) {
-    progress.done(`error verifying availability: ${err.message}`);
-    availableModels = models;
-  }
-
-  if (availableModels.length === 0) {
-    console.log("\n\u26A0 No panel models are available (all are quota-restricted or rate-limited). Limiting analysis and recommendations to opencode AI models exclusively.");
-    opencodeOnlyMode = true;
-    
-    console.log("\nFailed model details / errors:");
-    for (let i = 0; i < models.length; i++) {
-      const m = models[i];
-      const res = probeResults[i] || { ok: false, reason: "unknown error", errorOutput: "No output" };
-      const errSnippet = res.errorOutput ? res.errorOutput.split("\n")[0] : "unknown error";
-      console.log(`  • ${m}: ${res.reason} (${errSnippet})`);
-    }
-
-    console.log("\nFalling back to free opencode models...");
-    const freeModels = defaultPanelModels(config, cloudLookup);
-    if (freeModels.length === 0) {
-      throw new Error("No free models available");
-    }
-    const progress2 = createProgress("Verifying free models availability");
+  if (shouldProbeProviderAvailability()) {
+    let availableModels = [];
+    const progress = createProgress("Verifying panel models availability");
+    let probeResults = [];
     try {
-      const probeResults2 = await Promise.all(freeModels.map((m) => probeModel(m)));
-      availableModels = freeModels.filter((m, i) => probeResults2[i].ok);
-      progress2.done(`${availableModels.length} of ${freeModels.length} model(s) available`);
+      probeResults = await Promise.all(models.map((m) => probeModel(m)));
+      availableModels = models.filter((m, i) => probeResults[i].ok);
+      progress.done(`${availableModels.length} of ${models.length} model(s) available`);
     } catch (err) {
-      progress2.done(`error verifying availability: ${err.message}`);
-      availableModels = freeModels;
+      progress.done(`error verifying availability: ${err.message}`);
+      availableModels = models;
     }
-    if (availableModels.length === 0) {
-      throw new Error("No available free models found");
-    }
-  }
 
-  models = availableModels;
+    if (availableModels.length === 0) {
+      console.log("\n\u26A0 No panel models are available (all are quota-restricted or rate-limited). Limiting analysis and recommendations to opencode AI models exclusively.");
+      opencodeOnlyMode = true;
+      
+      console.log("\nFailed model details / errors:");
+      for (let i = 0; i < models.length; i++) {
+        const m = models[i];
+        const res = probeResults[i] || { ok: false, reason: "unknown error", errorOutput: "No output" };
+        const errSnippet = res.errorOutput ? res.errorOutput.split("\n")[0] : "unknown error";
+        console.log(`  • ${m}: ${res.reason} (${errSnippet})`);
+      }
+
+      console.log("\nFalling back to free opencode models...");
+      const freeModels = defaultPanelModels(config, cloudLookup);
+      if (freeModels.length === 0) {
+        throw new Error("No free models available");
+      }
+      const progress2 = createProgress("Verifying free models availability");
+      try {
+        const probeResults2 = await Promise.all(freeModels.map((m) => probeModel(m)));
+        availableModels = freeModels.filter((m, i) => probeResults2[i].ok);
+        progress2.done(`${availableModels.length} of ${freeModels.length} model(s) available`);
+      } catch (err) {
+        progress2.done(`error verifying availability: ${err.message}`);
+        availableModels = freeModels;
+      }
+      if (availableModels.length === 0) {
+        throw new Error("No available free models found");
+      }
+    }
+
+    models = availableModels;
+  }
 
   const agents = allConfigEntries(config);
   if (agents.length === 0) throw new Error("No agents or categories in config");
@@ -3291,6 +3316,8 @@ async function main() {
       "dry-run",
       "cloud-only",
       "local-only",
+      "exclude-rate-limited",
+      "exclude-quota-restricted",
       "debug",
       "interactive",
       "help",
@@ -3304,6 +3331,8 @@ async function main() {
       "dry-run": false,
       "cloud-only": false,
       "local-only": false,
+      "exclude-rate-limited": false,
+      "exclude-quota-restricted": false,
       debug: false,
       interactive: false,
       help: false,
@@ -3330,6 +3359,8 @@ async function main() {
   const autoYes = !dryRun && (parsedArgs.yes || (!parsedArgs.interactive && realTty));
   const cloudOnly = parsedArgs["cloud-only"];
   const localOnly = parsedArgs["local-only"];
+  providerExclusionOptions.rateLimited = parsedArgs["exclude-rate-limited"];
+  providerExclusionOptions.quotaRestricted = parsedArgs["exclude-quota-restricted"];
   const explicitModels = [parsedArgs.model]
     .flat()
     .filter((model) => typeof model === "string" && model.trim())
@@ -3365,6 +3396,7 @@ async function main() {
   // Start probing paid models in the background if we're not in local-only mode
   let paidProbesPromise = Promise.resolve([]);
   let paidProbesDetails = [];
+  let paidProbesEnabled = false;
   let initialCache = null;
   let initialAliases = {};
   let initialCloudLookup = { byId: {}, sets: {} };
@@ -3374,9 +3406,13 @@ async function main() {
     if (probesAwaited) return;
     probesAwaited = true;
     if (!localOnly && paidProbesPromise) {
-      const progress = createProgress("Verifying paid models availability");
-      await paidProbesPromise;
-      progress.done();
+      if (paidProbesEnabled) {
+        const progress = createProgress("Verifying paid models availability");
+        await paidProbesPromise;
+        progress.done();
+      } else {
+        await paidProbesPromise;
+      }
     }
   }
 
@@ -3412,18 +3448,23 @@ async function main() {
     }
     const topPaid = candidates;
 
-    paidProbesPromise = Promise.all(
-      topPaid.map(async (modelRef) => {
-        const res = await probeModel(modelRef);
-        return { modelRef, ok: res.ok, reason: res.reason, errorOutput: res.errorOutput };
-      })
-    ).then((results) => {
-      paidProbesDetails = results;
-      return sortedPaid.filter((m) => {
-        const provider = m.split("/")[0];
-        return isProviderAvailable(provider);
+    if (shouldProbeProviderAvailability()) {
+      paidProbesEnabled = true;
+      paidProbesPromise = Promise.all(
+        topPaid.map(async (modelRef) => {
+          const res = await probeModel(modelRef);
+          return { modelRef, ok: res.ok, reason: res.reason, errorOutput: res.errorOutput };
+        })
+      ).then((results) => {
+        paidProbesDetails = results;
+        return sortedPaid.filter((m) => {
+          const provider = m.split("/")[0];
+          return isProviderAvailable(provider);
+        });
       });
-    });
+    } else {
+      paidProbesPromise = Promise.resolve(sortedPaid);
+    }
   }
 
   // GPU / Ollama detection is local integration and is skipped in cloud-only mode.
@@ -3699,7 +3740,8 @@ async function main() {
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
       if (availablePaid.length > 0) {
-        console.log(`\nAvailable paid models:`);
+        const paidLabel = paidProbesEnabled ? "Available paid models" : "Paid models";
+        console.log(`\n${paidLabel}:`);
         printNumberedPanelModelGroups(availablePaid, "  ");
         console.log();
 
@@ -3714,9 +3756,13 @@ async function main() {
           opencodeOnlyMode = true;
         }
       } else {
-        console.log("\n\u26A0 No paid models are currently verified as available.");
-        console.log("  Please check that your API keys are set and exported in your environment");
-        console.log("  (e.g., GITHUB_TOKEN, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).");
+        if (paidProbesEnabled) {
+          console.log("\n\u26A0 No paid models are currently verified as available.");
+          console.log("  Please check that your API keys are set and exported in your environment");
+          console.log("  (e.g., GITHUB_TOKEN, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).");
+        } else {
+          console.log("\n\u26A0 No paid models found in the provider cache.");
+        }
         if (paidProbesDetails && paidProbesDetails.length > 0) {
           console.log("\n  Probe details / errors:");
           for (const res of paidProbesDetails) {
@@ -3752,7 +3798,7 @@ async function main() {
       printNumberedPanelModelGroups(panelModels, "  ");
       console.log();
 
-      // Ensure background probes of paid models have completed so quotaExceededProviders is fully populated
+      // Ensure background paid model preparation has completed before running the panel.
       await ensureProbesAwaited();
 
       // Multi-model panel: all free models recommend in parallel, debate, user picks
