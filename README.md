@@ -4,7 +4,7 @@ https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
 
 A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file. 
 
-> [!WARNING] **Disclaimer** 
+> [!INFO]
 > This tool generates a *point-in-time snapshot*. It does not replace dynamic API routing, it will not prevent real-time API quota rejections, and it certainly cannot measure "hallucinations" between one provider and another. Use this tool to get your initial bearings, then let OmO handle the actual execution.
 
 ## Quick Start
@@ -57,15 +57,15 @@ evaluating -
 
 ---
 
-## 🎯 What This Actually Does
+## 🎯 What this actually does
 
-* **Hardware Profiling (The Best Feature)** 
+* **Hardware profiling (The Best Feature)** 
 
     Detects your GPU architecture and available VRAM to shortlist local models (GGUFs, Ollama, vLLM) that will actually fit on your machine without OOM (Out of Memory) errors.
-* **Static Cost & Context Comparisons** 
+* **Static cost & context comparisons** 
 
     Provides a quick, point-in-time stack-rank of cloud providers (OpenRouter, Groq, Together AI) based on their advertised pricing and context windows so you can decide who gets your credit card.
-* **Initial Template Generation** 
+* **Initial template generation** 
 
     Spits out a baseline `oh-my-openagent.jsonc` file with valid syntax, saving you from manually typing out provider endpoints on day one.
 
@@ -73,19 +73,19 @@ evaluating -
 
 ## 🚫 What this tool can't do, and why you shouldn't overuse it
 
-* **It Does NOT Handle Rate Limits or Empty Quotas**
+* **It does NOT handle rate limits or empty quotas**
   
     If a provider runs out of credits mid-task, running a CLI tool is the wrong way to fix it. Set up the `fallbacks: []` array natively in OmO, or use a unified router like LiteLLM/OpenRouter to handle 402/429 errors automatically at runtime.
-* **It Does NOT Provide Real-Time Speed Benchmarks**
+* **It does NOT provide real-time speed benchmarks**
   
     Cloud API latency fluctuates by the minute based on network traffic. The "fastest" provider at 9:00 AM might be the slowest by 9:05 AM. Do not rely on this tool for real-time latency routing.
-* **It Does NOT Evaluate "Hallucinations"**
+* **It does NOT evaluate "hallucinations"**
   
     Model intelligence and hallucination rates require massive, standardized evaluation datasets (like MMLU) to quantify. This lightweight CLI cannot programmatically test a model's accuracy. 
 
 ---
 
-## 🚦 When Should You Actually Run This?
+## 🚦 When should you actually run this?
 
 1. **You just bought a new GPU** 
 
