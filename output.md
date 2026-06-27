@@ -1,5 +1,5 @@
 ```
-$ npx npx omo-recommend-models --cloud-only --yes
+$ npx omo-recommend-models --cloud-only --yes
 │
 ◇  Checking GPU: skipped by --cloud-only
 │

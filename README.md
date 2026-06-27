@@ -7,7 +7,7 @@ A CLI utility that profiles your GPU and recommends the most optimized local and
 Run the utility in your project directory to evaluate your hardware and update your model registry:
 
 ```
-$ npx npx omo-recommend-models --cloud-only --yes
+$ npx omo-recommend-models --cloud-only --yes
 │
 ◇  Checking GPU: skipped by --cloud-only
 │
