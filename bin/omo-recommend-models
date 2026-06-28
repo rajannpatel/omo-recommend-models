@@ -170,30 +170,14 @@ function commandExists(binary) {
 // Model scoring constants (from omo-recommend-cloud)
 // =========================================================================
 
-const FAMILY_TIERS = {
-  "claude-opus": 35,
-  "claude-sonnet": 28,
-  "gemini-pro": 25,
-  "gpt-pro": 25,
-  gpt: 22,
-  "gpt-codex": 18,
-  "gpt-codex-spark": 16,
-  "gemini-flash": 12,
-  "nemotron-free": 10,
-  "deepseek-flash-free": 8,
-  "claude-haiku": 8,
-  "gpt-mini": 5,
-  "mimo-v2.5-free": 3,
-  "north-free": 0,
-  "big-pickle": 0,
-};
+// FAMILY_TIERS removed - scoring now uses generic metadata signals:
+// - capabilities (reasoning, code, vision)
+// - context length
+// - cost (input/output price)
+// - release date (recency)
+// - variant tier (xhigh, max, high, medium, low)
+// Provider prestige removed - all providers treated equally
 
-const PROVIDER_PRESTIGE = {
-  openai: 5,
-  "github-copilot": 5,
-  anthropic: 5,
-  opencode: 5,
-};
 const VARIANT_BONUS = { xhigh: 10, max: 8, high: 5, medium: 0, low: -5 };
 const LOCAL_PROVIDER = "local";
 const FREE_PROVIDERS = ["opencode", LOCAL_PROVIDER];
@@ -213,6 +197,91 @@ const providerExclusionOptions = {
 };
 let opencodeOnlyMode = false;
 const providerProbePromises = new Map();
+
+// =========================================================================
+// Generic family detection from metadata (replaces hardcoded FAMILY_TIERS)
+// =========================================================================
+
+function detectFamilyFromMeta(meta, modelName) {
+  // Safely get capabilities as array
+  let caps = [];
+  if (meta && meta.capabilities) {
+    if (Array.isArray(meta.capabilities)) {
+      caps = meta.capabilities;
+    } else if (typeof meta.capabilities === 'string') {
+      caps = [meta.capabilities];
+    }
+  }
+  caps = caps.map(c => String(c).toLowerCase());
+  
+  const family = (meta?.family || "").toLowerCase();
+  const name = (modelName || "").toLowerCase();
+  
+  // Detect reasoning capability
+  const hasReasoning = caps.some(c => c.includes("reasoning"));
+  
+  // Detect model tier from context length and capabilities
+  const ctx = meta?.context_length || meta?.context_window || 0;
+  const isLargeContext = ctx > 100000;
+  const isMediumContext = ctx > 32000;
+  
+  // Generic tier scoring based on metadata
+  let baseScore = 0;
+  if (hasReasoning) baseScore += 20;
+  if (isLargeContext) baseScore += 10;
+  else if (isMediumContext) baseScore += 5;
+  
+  // Cost penalty (lower cost = higher score for free models)
+  const cost = meta?.cost || meta?.input_price || 0;
+  if (typeof cost === "number" && !isNaN(cost)) {
+    if (cost === 0) baseScore += 15; // Free models get bonus
+    else baseScore -= Math.min(cost * 10, 10);
+  }
+  
+  // Recency bonus
+  if (meta?.release_date) {
+    const d = new Date(meta.release_date);
+    const epochDays = Math.floor(d.getTime() / 86400000);
+    if (!isNaN(epochDays)) {
+      baseScore += Math.max(0, epochDays - 20000) * 2;
+    }
+  }
+  
+  return { family, name, baseScore, hasReasoning, ctx, cost };
+}
+
+function scoreModelFromMeta(model, variant, meta) {
+  const detected = detectFamilyFromMeta(meta, model);
+  let score = detected.baseScore;
+  
+  // Variant bonus
+  if (variant && VARIANT_BONUS[variant] !== undefined) {
+    score += VARIANT_BONUS[variant];
+  }
+  
+  // Model name heuristics for tier detection (generic, not vendor-specific)
+  const lower = model.toLowerCase();
+  if (lower.includes("opus") || lower.includes("pro") || lower.includes("ultra") || lower.includes("max") || lower.includes("large")) {
+    score += 14;
+  } else if (lower.includes("sonnet") || lower.includes("flash") || lower.includes("plus") || lower.includes("advanced")) {
+    score += 8;
+  } else if (lower.includes("haiku") || lower.includes("mini") || lower.includes("nano") || lower.includes("small") || lower.includes("lite")) {
+    score += 3;
+  }
+  if (lower.includes("reasoning") || lower.includes("think")) score += 10;
+  
+  // Size detection from model name (e.g., "70b", "32b", "7b")
+  const sizeMatch = lower.match(/(\d+)b/);
+  if (sizeMatch) {
+    const size = parseInt(sizeMatch[1]);
+    if (size >= 70) score += 20;
+    else if (size >= 30) score += 15;
+    else if (size >= 13) score += 10;
+    else if (size >= 7) score += 5;
+  }
+  
+  return isNaN(score) ? 0 : score;
+}
 
 // =========================================================================
 // Local model constants (from omo-recommend-local)
@@ -389,46 +458,15 @@ const BASE_VRAM = {
 };
 
 // =========================================================================
-// Cloud model scoring
+// Cloud model scoring (metadata-based, no hardcoded families)
 // =========================================================================
 
 function scoreFromCache(model, variant, entry) {
-  let score = 0;
-  if (entry.release_date) {
-    const d = new Date(entry.release_date);
-    const epochDays = Math.floor(d.getTime() / 86400000);
-    if (!isNaN(epochDays)) {
-      score += Math.max(0, epochDays - 20000) * 2;
-    }
-  }
-  const family = entry.family || "";
-  for (const [key, val] of Object.entries(FAMILY_TIERS)) {
-    if (family.includes(key) || family === key) {
-      score += val;
-      break;
-    }
-  }
-  const caps = entry.capabilities || [];
-  if (
-    Array.isArray(caps) &&
-    caps.some((c) => c.toLowerCase().includes("reasoning"))
-  ) {
-    score += 15;
-  }
-  const ctx = entry.context_length || entry.context_window || 0;
-  if (ctx > 200000) score += 8;
-  else if (ctx > 100000) score += 5;
-  else if (ctx > 32000) score += 3;
-  if (variant && VARIANT_BONUS[variant] !== undefined)
-    score += VARIANT_BONUS[variant];
-  const cost = entry.cost || entry.input_price || 0;
-  if (typeof cost === "number" && !isNaN(cost)) score -= Math.min(cost * 10, 5);
-  const provider = model.split("/")[0];
-  score += PROVIDER_PRESTIGE[provider] || 0;
-  return isNaN(score) ? 0 : score;
+  return scoreModelFromMeta(model, variant, entry);
 }
 
 function scoreFromHeuristics(model, variant) {
+  // Fallback heuristics when no metadata available - use generic tier detection
   const parts = model.split("/");
   const modelPart = parts[parts.length - 1] || "";
   let score = 0;
@@ -438,22 +476,28 @@ function scoreFromHeuristics(model, variant) {
   if (
     lower.includes("opus") ||
     lower.includes("pro") ||
-    lower.includes("ultra")
+    lower.includes("ultra") ||
+    lower.includes("max") ||
+    lower.includes("large")
   )
     score += 14;
   if (
     lower.includes("sonnet") ||
     lower.includes("flash") ||
+    lower.includes("plus") ||
+    lower.includes("advanced") ||
     lower.includes("codex")
   )
     score += 8;
   if (
     lower.includes("haiku") ||
     lower.includes("mini") ||
-    lower.includes("nano")
+    lower.includes("nano") ||
+    lower.includes("small") ||
+    lower.includes("lite")
   )
     score += 3;
-  if (lower.includes("reasoning")) score += 10;
+  if (lower.includes("reasoning") || lower.includes("think")) score += 10;
   if (lower.includes("max") || lower.includes("large") || lower.includes("big"))
     score += 5;
   if (variant && VARIANT_BONUS[variant] !== undefined)
@@ -466,8 +510,7 @@ function scoreFromHeuristics(model, variant) {
     else if (size >= 13) score += 10;
     else if (size >= 7) score += 5;
   }
-  const provider = model.split("/")[0];
-  score += PROVIDER_PRESTIGE[provider] || 0;
+  // No provider prestige - all providers treated equally
   return score;
 }
 
@@ -503,23 +546,41 @@ function sortPanelModelRefs(refs, config) {
   return scored.map((s) => s.ref);
 }
 
-function panelModelFamilyLabel(modelName) {
+function panelModelFamilyLabel(modelName, meta = null) {
   const model = String(modelName || "").toLowerCase();
-  if (model.includes("claude-opus")) return "claude-opus";
-  if (model.includes("claude-sonnet")) return "claude-sonnet";
-  if (model.includes("claude-haiku")) return "claude-haiku";
-  if (model.includes("gemini")) return "gemini";
-  if (model.includes("gpt")) return "gpt";
-  if (model.includes("codex")) return "codex";
-  if (model.includes("nemotron")) return "nemotron";
-  if (model.includes("deepseek")) return "deepseek";
-  if (model.includes("mimo")) return "mimo";
-  if (model.includes("north")) return "north";
-  if (model.includes("pickle")) return "big-pickle";
-  return "";
+  
+  // If metadata available, use it for family detection
+  if (meta) {
+    const detected = detectFamilyFromMeta(meta, modelName);
+    if (detected.family) return detected.family;
+  }
+  
+  // Fallback: generic family detection from model name patterns
+  // These are generic tier/category indicators, not vendor-specific
+  if (model.includes("opus") || model.includes("pro-max") || model.includes("ultra")) return "flagship";
+  if (model.includes("sonnet") || model.includes("pro") || model.includes("plus")) return "advanced";
+  if (model.includes("haiku") || model.includes("mini") || model.includes("nano") || model.includes("lite") || model.includes("small")) return "compact";
+  if (model.includes("flash") || model.includes("speed") || model.includes("fast")) return "speed";
+  if (model.includes("reasoning") || model.includes("think") || model.includes("r1")) return "reasoning";
+  if (model.includes("codex") || model.includes("coder") || model.includes("code")) return "code";
+  if (model.includes("vision") || model.includes("vl") || model.includes("multimodal")) return "vision";
+  if (model.includes("embedding") || model.includes("embed")) return "embedding";
+  
+  // Size-based tiers
+  const sizeMatch = model.match(/(\d+)b/);
+  if (sizeMatch) {
+    const size = parseInt(sizeMatch[1]);
+    if (size >= 70) return "xxlarge";
+    if (size >= 30) return "xlarge";
+    if (size >= 13) return "large";
+    if (size >= 7) return "medium";
+    return "small";
+  }
+  
+  return "unknown";
 }
 
-function groupPanelModelRefs(models) {
+function groupPanelModelRefs(models, cloudLookup = null) {
   const groupOrder = [];
   const byGroup = new Map();
   for (const ref of models || []) {
@@ -528,7 +589,17 @@ function groupPanelModelRefs(models) {
     const slash = trimmed.indexOf("/");
     const provider = slash === -1 ? "unknown" : trimmed.slice(0, slash);
     const model = slash === -1 ? trimmed : trimmed.slice(slash + 1);
-    const family = provider === "cli" ? "agents" : panelModelFamilyLabel(model);
+    
+    // Get metadata for this model if cloudLookup available
+    let meta = null;
+    if (cloudLookup) {
+      const modelMap = cloudLookup.byId?.[provider];
+      if (modelMap) {
+        meta = modelMap.get(model) || modelMap.get(ref) || null;
+      }
+    }
+    
+    const family = provider === "cli" ? "agents" : panelModelFamilyLabel(model, meta);
     const label = provider === "cli"
       ? "CLI agents"
       : provider === "opencode"
@@ -545,8 +616,8 @@ function groupPanelModelRefs(models) {
   return groupOrder.map((label) => ({ label, models: byGroup.get(label) }));
 }
 
-function printNumberedPanelModelGroups(models, indent = "  ") {
-  const groups = groupPanelModelRefs(models);
+function printNumberedPanelModelGroups(models, indent = "  ", cloudLookup = null) {
+  const groups = groupPanelModelRefs(models, cloudLookup);
   const width = String(groups.length).length;
   groups.forEach((group, index) => {
     const prefix = `${indent}${String(index + 1).padStart(width, " ")}. ${group.label}: `;
@@ -561,8 +632,8 @@ function printNumberedPanelModelGroups(models, indent = "  ") {
   return groups.length;
 }
 
-function printSelectablePanelModelGroups(models, indent = "  ") {
-  const groups = groupPanelModelRefs(models);
+function printSelectablePanelModelGroups(models, indent = "  ", cloudLookup = null) {
+  const groups = groupPanelModelRefs(models, cloudLookup);
   const width = String(groups.length).length;
   groups.forEach((group, index) => {
     const prefix = `${indent}[${String(index + 1).padStart(width, " ")}] ${group.label}: `;
@@ -892,9 +963,10 @@ function uniqueModelRefs(refs) {
 }
 
 function sortedPanelCandidates(refs, config, cloudLookup) {
-  return uniqueModelRefs(refs)
-    .filter((ref) => isPanelCandidateUsable(ref, cloudLookup))
-    .map((ref, index) => {
+  const uniqueRefs = uniqueModelRefs(refs);
+  const filtered = uniqueRefs.filter((ref) => isPanelCandidateUsable(ref, cloudLookup));
+  try {
+    const mapped = filtered.map((ref, index) => {
       const { provider } = splitModelRef(ref);
       const meta = cloudModelMeta(ref, cloudLookup);
       return {
@@ -904,8 +976,8 @@ function sortedPanelCandidates(refs, config, cloudLookup) {
         family: panelCandidateFamily(ref, cloudLookup),
         score: scoreModel(ref, null, meta),
       };
-    })
-    .sort((a, b) => {
+    });
+    const sorted = mapped.sort((a, b) => {
       const order = panelModelOrder(config);
       if (order !== "score") {
         const opencodeDiff =
@@ -914,6 +986,11 @@ function sortedPanelCandidates(refs, config, cloudLookup) {
       }
       return b.score - a.score || a.index - b.index;
     });
+    return sorted;
+  } catch (e) {
+    console.error(e.stack);
+    throw e;
+  }
 }
 
 function selectDiversePanelModels(refs, config, cloudLookup, max = MAX_PANEL_MODELS) {
@@ -1004,7 +1081,8 @@ function preferDetectedCliPanelModels(models, config, cloudLookup, max = MAX_PAN
     remaining > 0
       ? selectDiversePanelModels(nonCliRefs, config, cloudLookup, remaining)
       : [];
-  return uniqueModelRefs([...cliRefs, ...selectedNonCli]).slice(0, max);
+  const result = uniqueModelRefs([...cliRefs, ...selectedNonCli]).slice(0, max);
+  return result;
 }
 
 function selectPreferredPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS) {
@@ -1020,12 +1098,14 @@ function normalizeCliModelLine(line) {
 function rankAgyModel(line) {
   const lower = normalizeCliModelLine(line).toLowerCase();
   if (!lower) return Number.POSITIVE_INFINITY;
-  if (lower.includes("(low)") || lower.endsWith(" low")) return 0;
-  if (lower.includes("cheap") || lower.includes("budget")) return 1;
-  if (lower.includes("tiny") || lower.includes("mini") || lower.includes("small")) return 2;
-  if (lower.includes("(medium)") || lower.endsWith(" medium") || lower.includes("standard")) return 3;
-  if (lower.includes("(high)") || lower.endsWith(" high")) return 4;
-  if (lower.includes("large") || lower.includes("pro") || lower.includes("max") || lower.includes("ultra")) return 5;
+  
+  // Generic tier detection from model name/description patterns
+  if (lower.includes("(low)") || lower.endsWith(" low") || lower.includes("budget") || lower.includes("cheap")) return 0;
+  if (lower.includes("tiny") || lower.includes("mini") || lower.includes("small") || lower.includes("lite") || lower.includes("nano")) return 1;
+  if (lower.includes("(medium)") || lower.endsWith(" medium") || lower.includes("standard") || lower.includes("base")) return 2;
+  if (lower.includes("(high)") || lower.endsWith(" high") || lower.includes("pro") || lower.includes("plus") || lower.includes("advanced")) return 3;
+  if (lower.includes("large") || lower.includes("max") || lower.includes("ultra") || lower.includes("opus") || lower.includes("sonnet")) return 4;
+  if (lower.includes("xxl") || lower.includes("70b") || lower.includes("405b") || lower.includes("giant")) return 5;
   return 6;
 }
 
@@ -2476,93 +2556,41 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
   // Sort all candidate models globally by score descending
   candidateModels.sort((a, b) => b.score - a.score);
 
-  const FAMILY_LIMITS = {
-    "claude-opus": 1,
-    "claude-sonnet": 1,
-    "claude-haiku": 1,
-    "gpt-pro": 1,
-    "gpt-mini": 1,
-    codex: 1,
-    "gemini-pro": 1,
-    "gemini-flash": 1,
-    "google-gemma": 1,
-    "groq-llama": 1,
-    "groq-gpt-oss": 1,
-    "groq-qwen": 1,
-    "deepseek-chat": 1,
-    "deepseek-reasoner": 1,
-    "deepseek-pro": 1,
-    "opencode-mimo": 1,
-    "opencode-nemotron": 1,
-    "opencode-deepseek": 1,
-    "opencode-north": 1,
-    "opencode-big-pickle": 1,
-  };
-
-  const familyKey = (ref) => {
-    const lower = ref.toLowerCase();
+  // Generic family detection from metadata (replaces hardcoded FAMILY_LIMITS)
+  function detectFamilyFromCandidate(m) {
+    const meta = cloudLookup.byId?.[m.provider]?.get(m.modelId);
+    const detected = detectFamilyFromMeta(meta, m.modelId);
+    if (detected.family && detected.family !== "unknown") return detected.family;
     
-    // Free opencode models
-    if (lower.startsWith("opencode/")) {
-      if (lower.includes("mimo")) return "opencode-mimo";
-      if (lower.includes("nemotron")) return "opencode-nemotron";
-      if (lower.includes("deepseek")) return "opencode-deepseek";
-      if (lower.includes("north")) return "opencode-north";
-      if (lower.includes("big-pickle")) return "opencode-big-pickle";
+    // Fallback to generic name-based detection
+    const lower = m.ref.toLowerCase();
+    if (lower.includes("opus") || lower.includes("pro-max") || lower.includes("ultra")) return "flagship";
+    if (lower.includes("sonnet") || lower.includes("pro") || lower.includes("plus")) return "advanced";
+    if (lower.includes("haiku") || lower.includes("mini") || lower.includes("nano") || lower.includes("lite") || lower.includes("small")) return "compact";
+    if (lower.includes("flash") || lower.includes("speed") || lower.includes("fast")) return "speed";
+    if (lower.includes("reasoning") || lower.includes("think") || lower.includes("r1")) return "reasoning";
+    if (lower.includes("codex") || lower.includes("coder") || lower.includes("code")) return "code";
+    if (lower.includes("vision") || lower.includes("vl") || lower.includes("multimodal")) return "vision";
+    if (lower.includes("embedding") || lower.includes("embed")) return "embedding";
+    
+    const sizeMatch = lower.match(/(\d+)b/);
+    if (sizeMatch) {
+      const size = parseInt(sizeMatch[1]);
+      if (size >= 70) return "xxlarge";
+      if (size >= 30) return "xlarge";
+      if (size >= 13) return "large";
+      if (size >= 7) return "medium";
+      return "small";
     }
-
-    // Claude
-    if (lower.includes("claude-opus")) return "claude-opus";
-    if (lower.includes("claude-sonnet")) return "claude-sonnet";
-    if (lower.includes("claude-haiku")) return "claude-haiku";
-
-    // GPT
-    if (lower.includes("gpt-5.5-pro") || lower.includes("gpt-5.5") || lower.includes("gpt-5.4")) {
-      return "gpt-pro";
-    }
-    if (lower.includes("gpt-mini") || lower.includes("gpt-5-mini") || lower.includes("gpt-5.4-mini")) {
-      return "gpt-mini";
-    }
-    if (lower.includes("gpt-5.3-codex") || lower.includes("codex")) {
-      return "codex";
-    }
-
-    // Gemini
-    if (lower.includes("gemini-3.5-flash") || lower.includes("gemini-3-flash") || lower.includes("gemini-flash") || lower.includes("gemini-2.5-flash")) {
-      return "gemini-flash";
-    }
-    if (lower.includes("gemini-2.5-pro") || lower.includes("gemini-3.1-pro") || lower.includes("gemini-3-pro") || lower.includes("gemini-pro")) {
-      return "gemini-pro";
-    }
-
-    // Gemma
-    if (lower.includes("gemma")) return "google-gemma";
-
-    // Llama
-    if (lower.includes("llama")) return "groq-llama";
-
-    // GPT OSS
-    if (lower.includes("gpt-oss")) return "groq-gpt-oss";
-
-    // Qwen
-    if (lower.includes("qwen")) return "groq-qwen";
-
-    // Deepseek paid
-    if (lower.startsWith("deepseek/")) {
-      if (lower.includes("reasoner")) return "deepseek-reasoner";
-      if (lower.includes("pro")) return "deepseek-pro";
-      if (lower.includes("chat") || lower.includes("flash")) return "deepseek-chat";
-    }
-
-    return null;
-  };
+    return "unknown";
+  }
 
   const seenModelIds = new Set();
   const counts = {};
   const deduped = [];
   for (const m of candidateModels) {
-    const fam = familyKey(m.ref);
-    if (!fam) continue;
+    const fam = detectFamilyFromCandidate(m);
+    if (!fam || fam === "unknown") continue;
 
     // Deduplicate same models across multiple providers by model ID (e.g. gemini-2.5-pro)
     const normModelId = m.modelId.toLowerCase();
@@ -2570,7 +2598,7 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
       continue;
     }
 
-    const limit = FAMILY_LIMITS[fam] || 1;
+    const limit = 1; // One model per family for diversity
     const n = counts[fam] || 0;
     if (n < limit) {
       counts[fam] = n + 1;
@@ -2629,20 +2657,20 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
     "  * Slot 3 is the cheapest, highest-rate-limit model.",
     "- Remove duplicate entries across model, routing, and fallback_models.",
     "",
-    "SPECIFIC EXAMPLES:",
+    "SPECIFIC EXAMPLES (use generic synthetic names - real model names provided in CLOUD section above):",
     "",
     "Case 1 - Reasoning agent (paid/cloud required as primary):",
     "{",
     '  "name": "metis",',
     '  "type": "agent",',
     '  "profile": "Pre-planning consultant for ambiguous requirements",',
-    '  "model": {"provider": "github-copilot", "model": "claude-opus-4.8", "reason": "Paid cloud model as primary for reasoning/code agent per placement rules"},',
-    '  "routing": [{"provider": "opencode", "model": "nemotron-3-ultra-free", "reason": "Highest-scored cloud free model for delegation pool"},',
-    '           {"provider": "opencode", "model": "north-mini-code-free", "reason": "Second highest-scored cloud free model for delegation pool"}],',
+    '  "model": {"provider": "provider-a", "model": "flagship-model", "reason": "Paid cloud model as primary for reasoning/code agent per placement rules"},',
+    '  "routing": [{"provider": "opencode", "model": "top-free-model-1", "reason": "Highest-scored cloud free model for delegation pool"},',
+    '           {"provider": "opencode", "model": "top-free-model-2", "reason": "Second highest-scored cloud free model for delegation pool"}],',
     '  "fallback_models": [',
-    '    {"provider": "opencode", "model": "gemini-2.5-flash", "reason": "Slot 1: Closely matches primary model in capability/context"},',
-    '    {"provider": "opencode", "model": "mimo-v2.5-free", "reason": "Slot 2: Highly available, fast mid-tier model"},',
-    '    {"provider": "opencode", "model": "north-mini-code-free", "reason": "Slot 3: Cheapest, highest-rate-limit model"}',
+    '    {"provider": "opencode", "model": "mid-tier-free-model", "reason": "Slot 1: Closely matches primary model in capability/context"},',
+    '    {"provider": "opencode", "model": "fast-free-model", "reason": "Slot 2: Highly available, fast mid-tier model"},',
+    '    {"provider": "opencode", "model": "cheapest-free-model", "reason": "Slot 3: Cheapest, highest-rate-limit model"}',
     '  ]',
     "}",
     "",
@@ -2651,7 +2679,7 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
     '  "name": "explore",',
     '  "type": "agent",',
     '  "profile": "Fast codebase exploration and pattern matching - very lightweight utility work",',
-    '  "model": {"provider": "opencode", "model": "mimo-v2.5-free", "reason": "Free model suitable for lightweight exploration"},',
+    '  "model": {"provider": "opencode", "model": "top-free-model", "reason": "Free model suitable for lightweight exploration"},',
     '  "routing": [],',
     '  "fallback_models": []',
     "}",
@@ -2661,7 +2689,7 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
     '  "name": "visual-engineering",',
     '  "type": "category",',
     '  "profile": "Frontend, UI/UX, design, styling, animation",',
-    '  "model": {"provider": "opencode", "model": "nemotron-3-ultra-free", "reason": "Balanced performance for design and visual tasks"},',
+    '  "model": {"provider": "opencode", "model": "balanced-free-model", "reason": "Balanced performance for design and visual tasks"},',
     '  "routing": [],',
     '  "fallback_models": []',
     "}",
@@ -4096,6 +4124,7 @@ async function main() {
         }
       }
     }
+  } else {
   }
 
   // Determine which panel models to use

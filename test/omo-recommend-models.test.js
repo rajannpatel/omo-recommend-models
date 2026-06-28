@@ -979,8 +979,8 @@ test("async probe of paid models and selecting paid in prompt", async (t) => {
   const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only"]);
   assert.equal(result.timedOut, false, result.stderr);
   assert.match(result.stdout, /Paid models/);
-  assert.match(result.stdout, /good-prov: model-2/);
-  assert.match(result.stdout, /quota-exceeded-prov: model-1/);
+  assert.match(result.stdout, /good-prov\/unknown: model-2/);
+  assert.match(result.stdout, /quota-exceeded-prov\/unknown: model-1/);
 });
 
 test("exclude rate limited flag removes rate-limited providers from paid picker", async (t) => {
@@ -1012,7 +1012,7 @@ test("exclude rate limited flag removes rate-limited providers from paid picker"
   const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only", "--exclude-rate-limited"]);
   assert.equal(result.timedOut, false, result.stderr);
   assert.match(result.stdout, /Available paid models/);
-  assert.match(result.stdout, /good-prov: model-2/);
+  assert.match(result.stdout, /good-prov\/unknown: model-2/);
   assert.doesNotMatch(result.stdout, /Available paid models:[\s\S]+rate-limited-prov/);
 });
 
@@ -1233,9 +1233,9 @@ test("AI Panel default selection diversifies capable paid models and excludes sm
   const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
   const githubRefs = queryBlock.match(/github-copilot:/g) || [];
   assert.ok(githubRefs.length <= 2, queryBlock);
-  assert.match(queryBlock, /openai\/gpt: gpt-5\.5-pro/);
-  assert.match(queryBlock, /anthropic\/claude-opus: claude-opus-4\.6/);
-  assert.match(queryBlock, /google\/gemini: gemini-3-pro/);
+  assert.match(queryBlock, /openai\/advanced: gpt-5\.5-pro/);
+  assert.match(queryBlock, /anthropic\/flagship: claude-opus-4\.6/);
+  assert.match(queryBlock, /google\/advanced: gemini-3-pro/);
 });
 
 test("detected codex and agy occupy preferred AI Panel slots and use low-tier CLI models", async (t) => {
@@ -1347,5 +1347,5 @@ test("invalid CLI probe output is excluded from the AI Panel before voting", asy
   assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
   assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
   assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
-  assert.match(result.stdout, /AI Analysis \(via panel\(agy\+big-pickle\+tier-one\+north-mini-code-free\)\)/);
+  assert.match(result.stdout, /AI Analysis \(via panel\(agy\+tier-one\+north-mini-code-free\+tier-two\)\)/);
 });
