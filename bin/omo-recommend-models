@@ -72,6 +72,7 @@ function usage() {
     "      --exclude-rate-limited       Exclude providers after rate-limit errors",
     "      --exclude-quota-restricted   Exclude providers after quota/billing errors",
     "      --interactive  Force interactive prompts in non-TTY environments",
+    "      --dangerously-skip-permissions Skip validation permission checks",
     "      --debug        Print stack traces for errors",
     "  -h, --help         Show this help",
     "  -v, --version      Show version",
@@ -88,6 +89,10 @@ function registerChild(child) {
 function spawnTracked(command, args, options) {
   return registerChild(spawn(command, args, options));
 }
+
+// AbortController for graceful cancellation
+let abortController = new AbortController();
+let abortSignal = abortController.signal;
 
 function terminateActiveChildren() {
   const children = [...activeChildren].filter(
@@ -116,6 +121,8 @@ function installSignalHandlers() {
     if (handlingSignal) return;
     handlingSignal = true;
     process.stderr.write(`\n${signal} received; terminating subprocesses...\n`);
+    // Abort all pending operations
+    abortController.abort();
     terminateActiveChildren();
   };
   process.once("SIGINT", handler);
@@ -1044,6 +1051,13 @@ function isUsableRecommendation(rec, cloudLookup) {
   return hasEnoughContextForPanel(modelRef(rec.provider, rec.model), cloudLookup);
 }
 
+// Check if a recommendation is usable for the final config (allows quota/rate-limited models)
+function isUsableForConfig(rec, cloudLookup) {
+  if (!rec || !rec.provider || !rec.model) return false;
+  if (rec.provider === LOCAL_PROVIDER || isCliProvider(rec.provider)) return true;
+  return hasEnoughContextForPanel(modelRef(rec.provider, rec.model), cloudLookup);
+}
+
 function describeCliPanelModel(ref) {
   const id = splitModelRef(ref).model;
   if (id === "codex") return "cli/codex (Codex CLI)";
@@ -1195,7 +1209,7 @@ function markProviderRateLimited(provider, retryAfterSeconds, reason) {
   );
   state.reason = reason || "rate-limited";
 }
-function probeModel(modelRef) {
+function probeModel(modelRef, signal = abortSignal) {
   const slash = modelRef.indexOf("/");
   const provider = slash === -1 ? "" : modelRef.slice(0, slash);
   if (!provider || provider === LOCAL_PROVIDER || provider === "opencode" || isCliProvider(provider)) {
@@ -1210,6 +1224,11 @@ function probeModel(modelRef) {
         ? "rate-limited"
         : "provider-unavailable";
     return Promise.resolve({ ok: false, reason });
+  }
+
+  // Check if already aborted
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, reason: "aborted", errorOutput: "Aborted by user" });
   }
 
   if (providerProbePromises.has(provider)) {
@@ -1256,8 +1275,21 @@ function probeModel(modelRef) {
       } catch (e) {}
     }, 30000);
 
+    // Handle abort signal
+    const abortHandler = () => {
+      clearTimeout(timer);
+      try {
+        child.kill("SIGKILL");
+      } catch (e) {}
+      resolve({ ok: false, reason: "aborted", errorOutput: "Aborted by user" });
+    };
+    if (signal) {
+      signal.addEventListener("abort", abortHandler, { once: true });
+    }
+
     child.on("error", (err) => {
       clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", abortHandler);
       resolve({ ok: false, reason: `spawn-error: ${err.message}` });
     });
 
@@ -1270,6 +1302,7 @@ function probeModel(modelRef) {
 
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", abortHandler);
       if (timedOut) {
         markProviderRateLimited(provider, 30, "rate-limited");
         resolve({ ok: false, reason: "timeout", errorOutput: "Request timed out after 30s" });
@@ -2040,11 +2073,11 @@ function discoverCliModels(config = {}) {
       command: (prompt) =>
         [
           "agy",
-          "--print",
           "--dangerously-skip-permissions",
           ...(agyPanelModel
             ? ["--model", agyPanelModel]
             : []),
+          "--print",
           prompt,
         ],
     },
@@ -2378,7 +2411,7 @@ async function cleanAiResponse(raw) {
     raw,
   ].join("\n");
   try {
-    const result = await callPanelModelAsync(model, prompt, null, {});
+    const result = await callPanelModelAsync(model, prompt, abortSignal, {});
     return result || null;
   } catch (_) {
     return null;
@@ -2830,8 +2863,48 @@ async function runPanelAndSelect(
       }
     }
 
+    // Backfill failed CLI agents with available cloud models
+    const failedCliAgents = models
+      .map((m, i) => ({ model: m, result: probeResults[i] }))
+      .filter(({ model, result }) => {
+        const provider = splitModelRef(model).provider;
+        return isCliProvider(provider) && !result.ok;
+      })
+      .map(({ model }) => model);
+
+    if (failedCliAgents.length > 0) {
+      // Get all available cloud models that are not already in availableModels
+      const availableCloudModels = [];
+      for (const [provider, modelMap] of Object.entries(cloudLookup.byId || {})) {
+        if (provider === LOCAL_PROVIDER || provider === "opencode") continue;
+        if (!isProviderAvailable(provider)) continue;
+        for (const [modelId, meta] of modelMap.entries()) {
+          const ref = `${provider}/${modelId}`;
+          if (!hasEnoughContextForPanel(ref, cloudLookup)) continue;
+          if (!availableModels.includes(ref)) {
+            availableCloudModels.push({ ref, score: scoreModel(ref, null, meta) });
+          }
+        }
+      }
+      availableCloudModels.sort((a, b) => b.score - a.score);
+
+      // Backfill each failed CLI agent with the best available cloud model
+      for (const failedCli of failedCliAgents) {
+        if (availableCloudModels.length > 0) {
+          const backfill = availableCloudModels.shift();
+          availableModels.push(backfill.ref);
+          console.log(`  \u2192 Backfilling failed CLI agent ${failedCli} with ${backfill.ref}`);
+        }
+      }
+    }
+
     models = availableModels;
   }
+
+  // Print what models will be queried (after availability check)
+  console.log(`\nThis run would query:`);
+  printNumberedPanelModelGroups(models, "  ");
+  console.log();
 
   const agents = allConfigEntries(config);
   if (agents.length === 0) throw new Error("No agents or categories in config");
@@ -2883,6 +2956,10 @@ async function runPanelAndSelect(
       process.stdout.write(`\x1b[2Kevaluating ${currentAgent || "-"}\n`);
       process.stdout.write(`\x1b[2K${formatLinePrefix("tasks")}${formatCount(tasksDone, totalTasks)}\n`);
       process.stdout.write(`\x1b[2K${formatLinePrefix("agents")}${formatCount(agentsDone, agents.length)}\n`);
+      // Ensure output is flushed
+      if (typeof process.stdout._handle?.flush === 'function') {
+        process.stdout._handle.flush();
+      }
     }
   };
   for (const model of models) {
@@ -2912,7 +2989,7 @@ async function runPanelAndSelect(
           gpu,
           ollama,
         );
-        const rec = await callModelForAgent(m, prompt, null, statusRef, cliAgents, entry.name);
+        const rec = await callModelForAgent(m, prompt, abortSignal, statusRef, cliAgents, entry.name);
         if (rec) modelSuccessCounts.set(m, (modelSuccessCounts.get(m) || 0) + 1);
         st.results.push(rec ? { model: m, recommendation: rec } : null);
         tasksDone++;
@@ -3194,15 +3271,15 @@ function completeAiRecommendations(
     const norm =
       rec.model || rec.recommendations ? normalizeAgentRec({ ...rec }) : rec;
     norm.model = normalizeLocalRecommendation(norm.model, fittingByName, true);
-    if (norm.model && !isUsableRecommendation(norm.model, cloudLookup)) {
+    if (norm.model && !isUsableForConfig(norm.model, cloudLookup)) {
       norm.model = null;
     }
     norm.routing = (norm.routing || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, false))
-      .filter((r) => isUsableRecommendation(r, cloudLookup));
+      .filter((r) => isUsableForConfig(r, cloudLookup));
     norm.fallback_models = (norm.fallback_models || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
-      .filter((r) => isUsableRecommendation(r, cloudLookup));
+      .filter((r) => isUsableForConfig(r, cloudLookup));
     recByName.set(norm.name, norm);
   }
 
@@ -3211,7 +3288,6 @@ function completeAiRecommendations(
       provider !== LOCAL_PROVIDER &&
       modelMap &&
       modelMap.size > 0 &&
-      isProviderAvailable(provider) &&
       [...modelMap].some(([id]) =>
         hasEnoughContextForPanel(modelRef(provider, id), cloudLookup),
       ),
@@ -3236,15 +3312,15 @@ function completeAiRecommendations(
       entry.section.model_quality ||
       "";
     rec.model = normalizeLocalRecommendation(rec.model, fittingByName, true);
-    if (rec.model && !isUsableRecommendation(rec.model, cloudLookup)) {
+    if (rec.model && !isUsableForConfig(rec.model, cloudLookup)) {
       rec.model = null;
     }
     rec.routing = (rec.routing || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, false))
-      .filter((r) => isUsableRecommendation(r, cloudLookup));
+      .filter((r) => isUsableForConfig(r, cloudLookup));
     rec.fallback_models = (rec.fallback_models || [])
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
-      .filter((r) => isUsableRecommendation(r, cloudLookup));
+      .filter((r) => isUsableForConfig(r, cloudLookup));
 
     // Collect present providers across model + routing + fallback_models
     const presentProviders = new Set();
@@ -3725,6 +3801,10 @@ function showRebalance(config, richLookup, aliases, localModelNames) {
 // =========================================================================
 
 async function main() {
+  // Create a fresh AbortController for this run
+  abortController = new AbortController();
+  abortSignal = abortController.signal;
+  
   installSignalHandlers();
   const parsedArgs = mri(process.argv.slice(2), {
     boolean: [
@@ -3738,6 +3818,7 @@ async function main() {
       "debug",
       "interactive",
       "help",
+      "dangerously-skip-permissions",
       "version",
     ],
     string: ["model"],
@@ -3753,6 +3834,7 @@ async function main() {
       debug: false,
       interactive: false,
       help: false,
+      "dangerously-skip-permissions": false,
       version: false,
     },
   });
@@ -3867,12 +3949,16 @@ async function main() {
 
     if (shouldProbeProviderAvailability()) {
       paidProbesEnabled = true;
-      paidProbesPromise = Promise.all(
-        topPaid.map(async (modelRef) => {
-          const res = await probeModel(modelRef);
-          return { modelRef, ok: res.ok, reason: res.reason, errorOutput: res.errorOutput };
-        })
-      ).then((results) => {
+      // Create an array of promises that can be aborted
+      const probePromises = topPaid.map(async (modelRef) => {
+        // Check for abort before each probe
+        if (abortSignal.aborted) {
+          return { modelRef, ok: false, reason: "aborted", errorOutput: "Aborted by user" };
+        }
+        const res = await probeModel(modelRef, abortSignal);
+        return { modelRef, ok: res.ok, reason: res.reason, errorOutput: res.errorOutput };
+      });
+      paidProbesPromise = Promise.all(probePromises).then((results) => {
         paidProbesDetails = results;
         return sortedPaid.filter((m) => {
           const provider = m.split("/")[0];
@@ -4045,8 +4131,13 @@ async function main() {
     ([provider, modelMap]) =>
       provider !== LOCAL_PROVIDER && modelMap && modelMap.size > 0,
   ).length;
+  
+  // Count available CLI agents (installed AI CLIs)
+  const cliAgents = discoverCliModels(config);
+  const installedCliCount = cliAgents.length;
+  
   console.log(
-    `  \u2713 Model picture: ${cloudProviderCount} cloud provider(s), ${localModelNames.length} installed local model(s)\n`,
+    `  \u2713 AI Panel: ${cloudProviderCount} opencloud provider(s), ${installedCliCount} installed AI CLI(s)\n`,
   );
 
   // Determine which panel models to use
@@ -4141,11 +4232,89 @@ async function main() {
       );
       printCliPanelDisclosure(panelModels, "Explicit");
     } else if (!autoYes && !dryRun && !localOnly) {
+      // Discover available sources first
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
-      const picked = await pickPanelModels(config, availablePaid);
-      if (picked && picked.length > 0) {
-        panelModels = filterPanelModelsForContext(picked, cloudLookup);
+      const freeModels = discoverFreeModels();
+      const cliAgents = discoverCliModels(config);
+      
+      // Probe CLI agents to verify they work before including them
+      const workingCliAgents = [];
+      if (cliAgents.length > 0) {
+        const progress = createProgress("Verifying CLI agents availability");
+        const cliProbeResults = await Promise.all(
+          cliAgents.map(async (agent) => {
+            const result = await agent.probe();
+            return { agent, ok: result.ok };
+          })
+        );
+        for (const { agent, ok } of cliProbeResults) {
+          if (ok) {
+            workingCliAgents.push(agent);
+          } else {
+            console.log(`  \u2192 CLI agent ${agent.ref} failed probe, excluding from AI Panel`);
+          }
+        }
+        progress.done(`${workingCliAgents.length} of ${cliAgents.length} CLI agent(s) available`);
+      }
+      
+      // Show the three options
+      console.log("\nYou will have a chance to influence which AI providers will be involved in performing your AI Model analysis.");
+      console.log("You will be able to choose from:");
+      console.log("  1.) Local AI CLI agents (installed on your system)");
+      console.log("  2.) AI providers connected to opencode via 'opencode auth login'");
+      console.log("  3.) Free AI models available through opencode");
+      console.log("");
+      
+      if (workingCliAgents.length > 0) {
+        console.log("  Local AI CLI agents available:");
+        for (const agent of workingCliAgents) {
+          console.log(`    • ${agent.ref}${agent.panelModel ? ` (model: ${agent.panelModel})` : ''}`);
+        }
+        console.log("");
+      }
+      
+      if (availablePaid.length > 0) {
+        console.log("  AI providers connected to opencode:");
+        printNumberedPanelModelGroups(availablePaid, "    ");
+        console.log("");
+      }
+      
+      if (freeModels.length > 0) {
+        console.log("  Free opencode models:");
+        printNumberedPanelModelGroups(freeModels, "    ");
+        console.log("");
+      }
+      
+      // Let user choose
+      const options = [];
+      if (workingCliAgents.length > 0) options.push({ label: "1", description: "Local AI CLI agents only" });
+      if (availablePaid.length > 0) options.push({ label: "2", description: "Connected opencode providers (paid/cloud)" });
+      if (freeModels.length > 0) options.push({ label: "3", description: "Free opencode models" });
+      options.push({ label: "a", description: "All of the above (default)" });
+      
+      console.log("Options:");
+      for (const opt of options) {
+        console.log(`  [${opt.label}] ${opt.description}`);
+      }
+      
+      const answer = await promptUser("\nChoose source(s) for AI Panel (e.g. 1,2 or 'a' for all): ");
+      const choices = answer.trim().toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
+      
+      const selectedModels = [];
+      if (choices.includes("a") || choices.length === 0 || (choices.includes("1") && choices.includes("2") && choices.includes("3"))) {
+        // All
+        selectedModels.push(...workingCliAgents.map(a => a.ref));
+        selectedModels.push(...availablePaid);
+        selectedModels.push(...freeModels);
+      } else {
+        if (choices.includes("1")) selectedModels.push(...workingCliAgents.map(a => a.ref));
+        if (choices.includes("2")) selectedModels.push(...availablePaid);
+        if (choices.includes("3")) selectedModels.push(...freeModels);
+      }
+      
+      if (selectedModels.length > 0) {
+        panelModels = filterPanelModelsForContext(selectedModels, cloudLookup);
         panelModels = includeDetectedCliPanelModels(panelModels, config);
         console.log(`  \u2713 Using ${panelModels.length} selected model(s)\n`);
         printCliPanelDisclosure(panelModels, "Selected");
@@ -4161,53 +4330,6 @@ async function main() {
           `  \u2713 Using ${panelModels.length} configured panel model(s): ${panelModels.join(", ")}\n`,
         );
         printCliPanelDisclosure(panelModels, "Configured");
-      }
-    }
-
-    // Ask Free vs Paid prompt if we still don't have models and prompting is allowed
-    if (!panelModels && !autoYes && !dryRun && !localOnly) {
-      await ensureProbesAwaited();
-      const availablePaid = await paidProbesPromise;
-      if (availablePaid.length > 0) {
-        const paidLabel = paidProbesEnabled ? "Available paid models" : "Paid models";
-        console.log(`\n${paidLabel}:`);
-        printNumberedPanelModelGroups(availablePaid, "  ");
-        console.log();
-
-        const answer = await promptUser(
-          `Use best paid models or free opencode models (slow) for the analysis? (P/f): `,
-        );
-        const usePaid = answer.trim().toLowerCase() !== "f";
-        if (usePaid) {
-          panelModels = selectPreferredPanelModels(
-            availablePaid,
-            config,
-            cloudLookup,
-          );
-        } else {
-          panelModels = defaultPanelModels(config, cloudLookup);
-          opencodeOnlyMode = true;
-        }
-      } else {
-        if (paidProbesEnabled) {
-          console.log("\n\u26A0 No paid models are currently verified as available.");
-          console.log("  Please check that your API keys are set and exported in your environment");
-          console.log("  (e.g., GITHUB_TOKEN, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).");
-        } else {
-          console.log("\n\u26A0 No paid models found in the provider cache.");
-        }
-        if (paidProbesDetails && paidProbesDetails.length > 0) {
-          console.log("\n  Probe details / errors:");
-          for (const res of paidProbesDetails) {
-            if (!res.ok) {
-              const errSnippet = res.errorOutput ? res.errorOutput.split("\n")[0] : "unknown error";
-              console.log(`    • ${res.modelRef}: ${res.reason} (${errSnippet})`);
-            }
-          }
-        }
-        console.log("\n  Falling back to free opencode models.\n");
-        panelModels = defaultPanelModels(config, cloudLookup);
-        opencodeOnlyMode = true;
       }
     }
 
@@ -4231,9 +4353,6 @@ async function main() {
 
   try {
     if (!aiResult) {
-      console.log(`\nThis run would query:`);
-      printNumberedPanelModelGroups(panelModels, "  ");
-      console.log();
 
       // Ensure background paid model preparation has completed before running the panel.
       await ensureProbesAwaited();

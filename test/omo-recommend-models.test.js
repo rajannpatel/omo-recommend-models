@@ -843,7 +843,9 @@ test("selected quota exceeded panel models are rejected by default", async (t) =
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+  // Quota-exceeded models should now be ALLOWED in the final JSONC config
+  // (they're only excluded from the AI Panel analysis)
+  assert.equal(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
   assert.match(result.stdout, /quota-exceeded-prov.*model-1/);
   assert.match(result.stdout, /quota-exceeded/);
 });
@@ -884,7 +886,10 @@ test("quota exceeded errors block recommendations with exclude flag", async (t) 
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+  // With --exclude-quota-restricted, quota models are excluded from AI Panel
+  // but should still appear in the final config if the AI recommended them
+  // (the flag only affects panel availability, not the final config)
+  assert.match(result.stdout, /quota-exceeded/);
 });
 
 test("selected stdout quota errors are rejected by default", async (t) => {
@@ -919,7 +924,9 @@ test("selected stdout quota errors are rejected by default", async (t) => {
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  assert.notEqual(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
+  // Quota-exceeded models should now be ALLOWED in the final JSONC config
+  // (they're only excluded from the AI Panel analysis)
+  assert.equal(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
   assert.match(result.stdout, /stdout-quota-prov.*model-1/);
   assert.match(result.stdout, /quota-exceeded/);
 });
@@ -978,12 +985,13 @@ test("async probe of paid models and selecting paid in prompt", async (t) => {
 
   const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only"]);
   assert.equal(result.timedOut, false, result.stderr);
-  assert.match(result.stdout, /Paid models/);
+  // New prompt format shows three choices instead of "Paid models"
+  assert.match(result.stdout, /You will have a chance to influence which AI providers/);
   assert.match(result.stdout, /good-prov\/unknown: model-2/);
   assert.match(result.stdout, /quota-exceeded-prov\/unknown: model-1/);
 });
 
-test("exclude rate limited flag removes rate-limited providers from paid picker", async (t) => {
+test("exclude rate limited flag removes rate-limited providers from AI Panel", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -1011,9 +1019,12 @@ test("exclude rate limited flag removes rate-limited providers from paid picker"
 
   const result = await runCli(harness.env, ["\n", "p\n", "n\n"], ["--cloud-only", "--exclude-rate-limited"]);
   assert.equal(result.timedOut, false, result.stderr);
-  assert.match(result.stdout, /Available paid models/);
+  // New prompt format shows three choices
+  assert.match(result.stdout, /You will have a chance to influence which AI providers/);
   assert.match(result.stdout, /good-prov\/unknown: model-2/);
-  assert.doesNotMatch(result.stdout, /Available paid models:[\s\S]+rate-limited-prov/);
+  // Rate-limited provider should not appear in the AI Panel query list
+  const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
+  assert.doesNotMatch(queryBlock, /rate-limited-prov/);
 });
 
 test("panel cache exact match loads without displaying 'This run would query'", async (t) => {
@@ -1156,7 +1167,7 @@ test("early cache prompt allows repurposing cached results", async (t) => {
   assert.match(result.stdout, /model: opencode\/north-mini-code-free/);
 });
 
-test("interactive model picker lists paid models without availability probes by default", async (t) => {
+test("interactive model picker shows three-source prompt", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -1176,7 +1187,9 @@ test("interactive model picker lists paid models without availability probes by 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
 
-  assert.match(result.stdout, /Evaluate these models for opencode OMO agent roles:/);
+  // New prompt format with three choices
+  assert.match(result.stdout, /You will have a chance to influence which AI providers/);
+  assert.match(result.stdout, /providers/);
   assert.match(result.stdout, /good-prov\/model-paid/);
   assert.match(result.stdout, /quota-exceeded-prov\/model-bad/);
 });
@@ -1342,7 +1355,9 @@ test("invalid CLI probe output is excluded from the AI Panel before voting", asy
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
+  // Only working CLI agent (agy) should appear in the query list
+  assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: agy/);
+  assert.doesNotMatch(result.stdout, /CLI agents: codex/);
   assert.match(result.stdout, /Verifying panel models availability: 4 of 5 model\(s\) available/);
   assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
   assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
