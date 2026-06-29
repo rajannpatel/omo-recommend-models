@@ -69,6 +69,7 @@ import {
 } from "../lib/recommend/apply.js";
 import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
 import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
+import { preparePaidProviderModels } from "../lib/recommend/paid-provider-prep.js";
 import {
   panelModelFamilyLabel,
   printNumberedPanelModelGroups,
@@ -88,7 +89,6 @@ import {
 import {
   providerState,
   isProviderAvailable,
-  shouldProbeProviderAvailability,
   markProviderCreditExhausted,
   markProviderRateLimited,
   probeModel,
@@ -2104,88 +2104,20 @@ async function main() {
 
   const needPrompt = !doRebalance && explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
 
-  // Start probing paid models in the background if we're not in local-only mode
-  let paidProbesPromise = Promise.resolve([]);
-  let paidProbesDetails = [];
-  let paidProbesEnabled = false;
-  let initialCache = null;
-  let initialAliases = {};
-  let initialCloudLookup = { byId: {}, sets: {} };
-
-  let probesAwaited = false;
-  async function ensureProbesAwaited() {
-    if (probesAwaited) return;
-    probesAwaited = true;
-    if (!localOnlyFlag && paidProbesPromise) {
-      if (paidProbesEnabled) {
-        const progress = createProgress("Verifying paid models availability");
-        await paidProbesPromise;
-        progress.done();
-      } else {
-        await paidProbesPromise;
-      }
-    }
-  }
-
-  if (!localOnlyFlag) {
-    initialCache = loadProviderModels();
-    initialAliases = buildProviderAliases(config);
-    initialCloudLookup = buildRichModelLookup(initialCache);
-
-    const paidRefs = [];
-    for (const [provider, modelMap] of Object.entries(initialCloudLookup.byId || {})) {
-      if (provider === LOCAL_PROVIDER || provider === "opencode") continue;
-      for (const modelId of modelMap.keys()) {
-        paidRefs.push(`${provider}/${modelId}`);
-      }
-    }
-    const sortedPaid = sortPanelModelRefs(paidRefs, config);
-
-    // Group by provider to avoid being dominated by a single provider with exhausted quota
-    const byProvider = {};
-    for (const ref of sortedPaid) {
-      const provider = ref.split("/")[0];
-      if (!byProvider[provider]) byProvider[provider] = [];
-      byProvider[provider].push(ref);
-    }
-
-    const candidates = [];
-    const providerKeys = Object.keys(byProvider);
-    // Take top 1 from each provider to check provider health without redundant queries
-    for (const prov of providerKeys) {
-      if (byProvider[prov] && byProvider[prov][0]) {
-        candidates.push(byProvider[prov][0]);
-      }
-    }
-    const topPaid = candidates;
-
-    if (shouldProbeProviderAvailability(ctx)) {
-      paidProbesEnabled = true;
-      // Create an array of promises that can be aborted
-      const probePromises = topPaid.map(async (modelRef) => {
-        // Check for abort before each probe
-        if (ctx.signal.aborted) {
-          return { modelRef, ok: false, reason: "aborted", errorOutput: "Aborted by user" };
-        }
-        const res = await probeModel(ctx, modelRef, ctx.signal);
-        return { modelRef, ok: res.ok, reason: res.reason, errorOutput: res.errorOutput };
-      });
-      paidProbesPromise = Promise.all(probePromises).then((results) => {
-        paidProbesDetails = results;
-        return sortedPaid.filter((m) => {
-          const provider = m.split("/")[0];
-          return (
-            isProviderAvailable(ctx, provider) &&
-            hasEnoughContextForPanel(m, initialCloudLookup)
-          );
-        });
-      });
-    } else {
-      paidProbesPromise = Promise.resolve(
-        filterUsablePanelModels(sortedPaid, initialCloudLookup),
-      );
-    }
-  }
+  const paidProviderPrep = preparePaidProviderModels({
+    config,
+    ctx,
+    localOnlyFlag,
+    hasEnoughContextForPanel,
+    filterUsablePanelModels,
+  });
+  const {
+    initialCache,
+    initialAliases,
+    initialCloudLookup,
+    paidProbesPromise,
+    ensureProbesAwaited,
+  } = paidProviderPrep;
 
   // GPU / Ollama detection is local integration and is skipped in cloud-only mode.
   let gpu;
