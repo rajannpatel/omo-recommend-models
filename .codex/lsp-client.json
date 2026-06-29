@@ -1,0 +1,22 @@
+{
+  "lsp": {
+    "typescript": {
+      "priority": 100
+    },
+    "yaml-ls": {
+      "priority": 100,
+      "initialization": {
+        "yaml": {
+          "schemaStore": {
+            "enable": true
+          },
+          "validate": true,
+          "completion": true,
+          "format": {
+            "enable": true
+          }
+        }
+      }
+    }
+  }
+}
