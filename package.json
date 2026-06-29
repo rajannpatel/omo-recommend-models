@@ -1,6 +1,6 @@
 {
   "name": "omo-recommend-models",
-  "version": "1.2.1",
+  "version": "1.2.3",
   "description": "Consolidated AI-powered model recommendation CLI for OpenCode OMO agent configurations",
   "type": "module",
   "bin": {

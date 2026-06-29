@@ -51,6 +51,88 @@ evaluating -
 
 ---
 
+## 🚩 CLI Flags Reference
+
+### Discovery Control
+
+| Flag | Default | Alias | Description |
+|------|---------|-------|-------------|
+| `--cloud-only` | `false` | `--exclude-local` | Skip GPU detection, Ollama, and all local model discovery. Only cloud providers are considered. |
+| `--local-only` | `false` | `--exclude-cloud` | Skip cloud model discovery and API provider checks. Only local/Ollama models are considered. |
+| `--model <ref>` | — | — | Use an explicit AI panel model (e.g. `opencode/big-pickle`). May be repeated for multiple models. |
+
+### Exclusion Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--exclude-free` | `false` | Exclude free/open-source models from the final JSONC configuration output. Free models will not appear in `model`, `routing`, or `fallback_models`. |
+| `--no-exclude-free` | `false` | Negation of `--exclude-free`. Ensures free models are allowed in the final JSONC configuration. |
+| `--free-config` | `false` | Explicitly include free models in the JSONC configuration file. |
+| `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
+| `--free-panel` | `false` | Explicitly include free/open-source models in the AI Panel evaluation. |
+| `--no-free-panel` | `false` | Negation of `--free-panel`. Exclude free models from the AI Panel model selection. |
+| `--exclude-codex` | `false` | Exclude `cli/codex` (OpenAI Codex CLI agent) from the AI Panel. |
+| `--exclude-codex-cli` | `false` | Alias for `--exclude-codex`. |
+| `--exclude-agy` | `false` | Exclude `cli/agy` (Agy CLI agent) from the AI Panel. |
+| `--exclude-agy-cli` | `false` | Alias for `--exclude-agy`. |
+| `--exclude-rate-limited` | `false` | Exclude providers that returned rate-limit (HTTP 429) errors during probing. Without this flag, rate-limited providers remain eligible. |
+| `--exclude-quota-restricted` | `false` | Exclude providers with quota, billing, credit, or payment errors. Without this flag, quota-restricted providers remain eligible. |
+
+### Behavior Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--yes`, `-y` | `false` | Apply all recommendations without interactive confirmation. Required for non-interactive/CI environments to proceed past preview. |
+| `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
+| `--rebalance` | `false` | Run in algorithmic rebalance mode. Skips the AI panel entirely and restructures existing `model` and `fallback_models` assignments around score-based tier chains. |
+| `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
+| `--dangerously-skip-permissions` | `false` | Skip validation permission checks during config writing. Use with caution. |
+| `--debug` | `false` | Print full stack traces for errors to aid debugging. |
+| `--model <ref>` | — | Specify an explicit AI panel model reference. Repeatable: `--model prov/model1 --model prov/model2`. |
+
+### Opt-Out Flags (Enabled by Default)
+
+These flags use an **opt-out** pattern — the behavior they control is enabled by default, and passing the flag disables it via the `--no-` prefix.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--no-cache` | `true` (cache enabled) | Skip loading cached AI panel results. Forces a fresh panel evaluation on every run. |
+| `--no-install` | `true` (install enabled) | Skip pulling/installing recommended local Ollama models. Useful for preview-only runs or when you manage models separately. |
+| `--no-uninstall` | `true` (uninstall enabled) | Skip removing conflicting or superseded local Ollama models. |
+| `--no-remove-orphans` | `true` (orphan removal enabled) | Skip pruning Ollama models that the AI never evaluated or recommended. |
+| `--no-rebalance-apply` | `false` | Do not write restructuring changes in rebalance mode. Only applies when `--rebalance` is active. |
+| `--no-apply` | `true` (apply enabled) | Do not write any final recommendations to the JSONC config file. Shows what would change without modifying anything. |
+
+### Informational Flags
+
+| Flag | Description |
+|------|-------------|
+| `-h`, `--help` | Show the usage help text and exit. |
+| `-v`, `--version` | Print the installed version and exit. |
+
+### Interactive vs. Non-Interactive Behavior
+
+| Context | Default Behavior | How to Override |
+|---------|-----------------|-----------------|
+| **TTY terminal** | Prompts for confirmation on installs, uninstalls, and config writes. Auto-yes only if `--yes` passed. | Pass `--yes` to skip all prompts. Pass `--interactive` to force prompts in CI. |
+| **Non-TTY / CI** | Dry-run preview only. Shows what would change without writing anything. | Pass `--yes` to auto-apply. Pass individual `--no-*` flags to opt out of specific steps. |
+
+### Transparency Logging
+
+When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Panel Considerations & Exclusions` section showing which models, providers, and agents were included or excluded, and which CLI flags caused each exclusion:
+
+```
+── AI Panel Considerations & Exclusions ──
+  • Local / Ollama models excluded via --exclude-local
+  • Cloud / paid models considered
+  • AI CLI agent cli/codex excluded via --exclude-codex
+  • AI CLI agent cli/agy excluded via --exclude-agy
+  • Free models excluded from AI Panel via --no-free-panel
+  • Free models considered for JSONC configuration
+```
+
+---
+
 ## 🎯 What this actually does
 
 * **Hardware profiling (The Best Feature)** 

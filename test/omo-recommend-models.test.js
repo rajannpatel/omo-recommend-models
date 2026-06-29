@@ -1194,6 +1194,55 @@ test("interactive model picker shows three-source prompt", async (t) => {
   assert.match(result.stdout, /quota-exceeded-prov\/model-bad/);
 });
 
+test("interactive free model inclusion/exclusion prompts for AI Panel and JSONC config", async (t) => {
+  const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
+  const harness = createHarness(t, {
+    config: initialConfig,
+    providerCache: {
+      models: {
+        "opencode": [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 }
+        ],
+        "good-prov": [{ id: "model-paid", family: "model-family" }],
+      }
+    },
+    aiResponse: {
+      analysis: "test",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle", reason: "test" },
+          routing: [],
+          fallback_models: [{ provider: "opencode", model: "north-mini-code-free", reason: "fallback" }],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  // Select all sources (a), exclude from panel (n), exclude from config (n), don't apply (n)
+  const result = await runCli(harness.env, ["a\n", "n\n", "n\n", "n\n"], ["--cloud-only"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+
+  // Should show free model detection
+  assert.match(result.stdout, /Free models detected:/);
+  // Should prompt for AI Panel inclusion
+  assert.match(result.stdout, /Include free models in the AI Panel analysis/);
+  // Should prompt for JSONC config inclusion
+  assert.match(result.stdout, /Include free models in the JSONC configuration file/);
+  // Should show exclusion messages
+  assert.match(result.stdout, /Free models excluded from AI Panel analysis/);
+  assert.match(result.stdout, /Free models will be excluded from JSONC configuration/);
+  
+  // "This run would query" should NOT include free models since they were excluded from panel
+  const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
+  assert.doesNotMatch(queryBlock, /opencode\/north-mini-code-free/);
+});
+
 test("AI Panel default selection diversifies capable paid models and excludes small contexts", async (t) => {
   const initialConfig = defaultConfig();
   const harness = createHarness(t, {
@@ -1364,3 +1413,86 @@ test("invalid CLI probe output is excluded from the AI Panel before voting", asy
   assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
   assert.match(result.stdout, /AI Analysis \(via panel\(agy\+tier-one\+north-mini-code-free\+tier-two\)\)/);
 });
+
+test("exclude CLI agent flags and print transparency logs", async (t) => {
+  const harness = createHarness(t, {
+    codex: true,
+    agy: true,
+  });
+
+  const result = await runCli(harness.env, "", [
+    "--dry-run",
+    "--cloud-only",
+    "--exclude-codex",
+    "--exclude-agy"
+  ], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /AI CLI agent cli\/codex excluded via --exclude-codex/);
+  assert.match(result.stdout, /AI CLI agent cli\/agy excluded via --exclude-agy/);
+});
+
+test("exclude free models flags and print transparency logs", async (t) => {
+  const harness = createHarness(t);
+
+  const result = await runCli(harness.env, "", [
+    "--dry-run",
+    "--cloud-only",
+    "--exclude-free",
+    "--no-free-panel"
+  ], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Free models excluded from AI Panel via --no-free-panel/);
+  assert.match(result.stdout, /Free models excluded from JSONC configuration/);
+});
+
+test("no-install flag prints skipped message", async (t) => {
+  const harness = createHarness(t, {
+    localCatalog: [
+      { name: "local-model-a:latest", size: "8B", vram: 6, score: 80, baseModel: "local-model-a", tag: "latest" },
+      { name: "local-model-b:latest", size: "8B", vram: 6, score: 80, baseModel: "local-model-b", tag: "latest" },
+    ],
+    ollamaModels: [{ name: "local-model-a:latest" }],
+    gpu: {
+      hasGpu: true,
+      name: "RTX 4090",
+      label: "RTX 4090 (24GB VRAM)",
+      vramGb: 24,
+    },
+    config: defaultConfig({
+      root: {
+        agents: {
+          sisyphus: {
+            model: "ollama/local-model-a:latest",
+            fallback_models: [],
+          },
+        },
+      },
+    }),
+    aiResponse: {
+      analysis: "placements",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          model: { provider: "ollama", model: "local-model-b:latest" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+    },
+  });
+
+  const result = await runCli(harness.env, "", [
+    "-y",
+    "--no-install",
+  ], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /skipped installation of local-model-b:latest via --no-install/);
+});
+

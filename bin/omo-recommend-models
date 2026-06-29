@@ -31,7 +31,7 @@ import {
   confirm as plainConfirm,
   promptUser as plainPromptUser,
   pickFreeModel,
-  discoverFreeModels,
+  discoverFreeModels as originalDiscoverFreeModels,
   callOpencodeChat,
   parseAiJson,
   loadConfig,
@@ -50,6 +50,13 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const VERSION = "1.0.0";
+
+function discoverFreeModels() {
+  if (process.argv.includes('--no-free-panel')) {
+    return [];
+  }
+  return originalDiscoverFreeModels();
+}
 
 const activeChildren = new Set();
 let clack = null;
@@ -73,6 +80,20 @@ function usage() {
     "      --exclude-quota-restricted   Exclude providers after quota/billing errors",
     "      --interactive  Force interactive prompts in non-TTY environments",
     "      --dangerously-skip-permissions Skip validation permission checks",
+    "      --no-cache                    Skip cached panel results, run fresh",
+    "      --no-free-panel              Exclude free models from the AI Panel",
+    "      --free-panel                 Include free models in the AI Panel",
+    "      --exclude-free               Exclude free models from final JSONC configuration",
+    "      --no-exclude-free            Ensure free models are allowed in final JSONC",
+    "      --free-config                Include free models in JSONC configuration",
+    "      --no-free-config             Exclude free models from JSONC configuration",
+    "      --exclude-codex              Exclude codex CLI agent from the AI Panel",
+    "      --exclude-agy                Exclude agy CLI agent from the AI Panel",
+    "      --no-install                 Skip installation of recommended local models",
+    "      --no-uninstall               Skip removal of conflicting local models",
+    "      --no-remove-orphans          Skip pruning orphan Ollama models",
+    "      --no-rebalance-apply         Do not write restructuring changes in rebalance mode",
+    "      --no-apply                   Do not write final recommendations to config",
     "      --debug        Print stack traces for errors",
     "  -h, --help         Show this help",
     "  -v, --version      Show version",
@@ -688,19 +709,19 @@ function opencodePanelModelsFromLookup(cloudLookup) {
     .map((id) => (id.startsWith("opencode/") ? id : `opencode/${id}`));
 }
 
-function defaultPanelModels(config, cloudLookup = null) {
+function defaultPanelModels(config, cloudLookup = null, options = {}) {
   const discovered = discoverFreeModels();
   const refs =
     discovered.length > 0
       ? discovered
       : opencodePanelModelsFromLookup(cloudLookup);
-  return preferDetectedCliPanelModels(refs, config, cloudLookup);
+  return preferDetectedCliPanelModels(refs, config, cloudLookup, MAX_PANEL_MODELS, options);
 }
 
-function plannedPanelModels(config, panelModels, cloudLookup = null) {
+function plannedPanelModels(config, panelModels, cloudLookup = null, options = {}) {
   if (panelModels && panelModels.length > 0) return panelModels;
   const configured = configuredPanelModels(config);
-  return configured.length > 0 ? configured : defaultPanelModels(config, cloudLookup);
+  return configured.length > 0 ? configured : defaultPanelModels(config, cloudLookup, options);
 }
 
 function createProgress(label) {
@@ -1074,17 +1095,17 @@ function printCliPanelDisclosure(models, source) {
   );
 }
 
-function includeDetectedCliPanelModels(models, config) {
+function includeDetectedCliPanelModels(models, config, options = {}) {
   const selected = uniqueModelRefs(models);
   if (!selected.some((ref) => splitModelRef(ref).provider === "cli")) {
     return selected;
   }
-  const detectedRefs = discoverCliModels(config).map((agent) => agent.ref);
+  const detectedRefs = discoverCliModels(config, options).map((agent) => agent.ref);
   return uniqueModelRefs([...selected, ...detectedRefs]);
 }
 
-function preferDetectedCliPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS) {
-  const cliRefs = discoverCliModels(config)
+function preferDetectedCliPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS, options = {}) {
+  const cliRefs = discoverCliModels(config, options)
     .map((agent) => agent.ref)
     .filter((ref) => hasPanelCandidateShapeAndContext(ref, cloudLookup));
   const nonCliRefs = uniqueModelRefs(models).filter(
@@ -1099,8 +1120,8 @@ function preferDetectedCliPanelModels(models, config, cloudLookup, max = MAX_PAN
   return result;
 }
 
-function selectPreferredPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS) {
-  return preferDetectedCliPanelModels(models, config, cloudLookup, max);
+function selectPreferredPanelModels(models, config, cloudLookup, max = MAX_PANEL_MODELS, options = {}) {
+  return preferDetectedCliPanelModels(models, config, cloudLookup, max, options);
 }
 
 function normalizeCliModelLine(line) {
@@ -1162,7 +1183,7 @@ function providerState(provider) {
 }
 
 function isProviderAvailable(provider, now = Date.now()) {
-  if (!provider || provider === LOCAL_PROVIDER || isCliProvider(provider))
+  if (!provider || provider === LOCAL_PROVIDER || provider === "ollama" || isCliProvider(provider))
     return true;
   if (opencodeOnlyMode && provider !== "opencode")
     return false;
@@ -1931,7 +1952,8 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
  * { ref, call } where ref is like "cli/codex" and call is
  * an async function(prompt) => parsed JSON or null.
  */
-function discoverCliModels(config = {}) {
+function discoverCliModels(config = {}, options = {}) {
+  const { excludeCodex, excludeAgy } = options;
   const agents = [];
   const codexPanelModel = configuredCliPanelModel(config, "codex");
   const agyPanelModel =
@@ -2049,7 +2071,7 @@ function discoverCliModels(config = {}) {
     };
   }
 
-  const cliAdapters = [
+  let cliAdapters = [
     {
       binary: "codex",
       ref: "cli/codex",
@@ -2082,6 +2104,13 @@ function discoverCliModels(config = {}) {
         ],
     },
   ];
+
+  if (excludeCodex) {
+    cliAdapters = cliAdapters.filter((a) => a.binary !== "codex");
+  }
+  if (excludeAgy) {
+    cliAdapters = cliAdapters.filter((a) => a.binary !== "agy");
+  }
 
   const configuredAgents = config?.omo?.panel_cli_agents;
   if (configuredAgents && typeof configuredAgents === "object") {
@@ -2797,10 +2826,11 @@ async function runPanelAndSelect(
   allLocalModels,
   gpu,
   ollama,
-  cloudOnly,
+  cloudOnlyFlag,
   panelModels,
+  cliOptions = {},
 ) {
-  const cliAgents = discoverCliModels(config);
+  const cliAgents = discoverCliModels(config, cliOptions);
   let models;
   if (panelModels && panelModels.length > 0) {
     models = filterPanelModelsForContext(panelModels, cloudLookup);
@@ -3322,6 +3352,20 @@ function completeAiRecommendations(
       .map((r) => normalizeLocalRecommendation(r, fittingByName, true))
       .filter((r) => isUsableForConfig(r, cloudLookup));
 
+    if (rec.model && rec.model.provider === LOCAL_PROVIDER) {
+      ensureLocalDecision(completed, rec.model.model, allLocalModels, gpu, ollama);
+    }
+    for (const r of rec.routing) {
+      if (r && r.provider === LOCAL_PROVIDER) {
+        ensureLocalDecision(completed, r.model, allLocalModels, gpu, ollama);
+      }
+    }
+    for (const r of rec.fallback_models) {
+      if (r && r.provider === LOCAL_PROVIDER) {
+        ensureLocalDecision(completed, r.model, allLocalModels, gpu, ollama);
+      }
+    }
+
     // Collect present providers across model + routing + fallback_models
     const presentProviders = new Set();
     if (rec.model && rec.model.provider)
@@ -3594,7 +3638,7 @@ function pullModel(modelName) {
   }
 }
 
-async function installAndUninstallModels(decisions, ollama, autoYes) {
+async function installAndUninstallModels(decisions, ollama, autoYes, noInstall = false, noUninstall = false) {
   if (!decisions) return new Set();
   const normalizedDecisions = decisions
     .map((d) => ({ ...d, name: normalizeLocalModelName(d.name) }))
@@ -3614,6 +3658,10 @@ async function installAndUninstallModels(decisions, ollama, autoYes) {
     if (alreadyInstalled) {
       console.log(`  \u2713 ${d.name} already installed`);
       confirmed.add(d.name);
+      continue;
+    }
+    if (noInstall) {
+      console.log(`  \u2192 skipped installation of ${d.name} via --no-install`);
       continue;
     }
     if (autoYes) {
@@ -3649,6 +3697,10 @@ async function installAndUninstallModels(decisions, ollama, autoYes) {
     if (!isInstalled) {
       continue;
     }
+    if (noUninstall) {
+      console.log(`  \u2192 skipped uninstall of ${d.name} via --no-uninstall`);
+      continue;
+    }
     if (autoYes) {
       try {
         execFileSync("ollama", ["rm", d.name], {
@@ -3680,13 +3732,17 @@ async function installAndUninstallModels(decisions, ollama, autoYes) {
   return confirmed;
 }
 
-async function offerUninstallOrphans(decisions, ollama, autoYes) {
+async function offerUninstallOrphans(decisions, ollama, autoYes, noRemoveOrphans = false) {
   // Models the AI evaluated (any decision = considered)
   const considered = new Set((decisions || []).map((d) => d.name));
   // Installed models the AI never mentioned
   const orphans = ollama.models.filter((m) => !considered.has(m.name));
 
   if (orphans.length === 0) return;
+  if (noRemoveOrphans) {
+    console.log(`  \u2192 skipped orphan removal via --no-remove-orphans`);
+    return;
+  }
 
   console.log(
     `\n\u2500\u2500 Unnecessary models (${orphans.length}) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
@@ -3811,8 +3867,8 @@ async function main() {
       "yes",
       "rebalance",
       "dry-run",
-      "cloud-only",
-      "local-only",
+      "exclude-local",
+      "exclude-cloud",
       "exclude-rate-limited",
       "exclude-quota-restricted",
       "debug",
@@ -3820,15 +3876,34 @@ async function main() {
       "help",
       "dangerously-skip-permissions",
       "version",
+      "exclude-free",
+      "free-config",
+      "free-panel",
+      "exclude-codex",
+      "exclude-agy",
+      "cache",
+      "install",
+      "uninstall",
+      "remove-orphans",
+      "apply",
+      "rebalance-apply",
     ],
-    string: ["model"],
-    alias: { h: "help", v: "version", y: "yes" },
+    string: ["model", "profile"],
+    alias: {
+      h: "help",
+      v: "version",
+      y: "yes",
+      "cloud-only": "exclude-local",
+      "local-only": "exclude-cloud",
+      "exclude-codex-cli": "exclude-codex",
+      "exclude-agy-cli": "exclude-agy",
+    },
     default: {
       yes: false,
       rebalance: false,
       "dry-run": false,
-      "cloud-only": false,
-      "local-only": false,
+      "exclude-local": false,
+      "exclude-cloud": false,
       "exclude-rate-limited": false,
       "exclude-quota-restricted": false,
       debug: false,
@@ -3836,6 +3911,18 @@ async function main() {
       help: false,
       "dangerously-skip-permissions": false,
       version: false,
+      "exclude-free": false,
+      "free-config": false,
+      "free-panel": false,
+      "exclude-codex": false,
+      "exclude-agy": false,
+      cache: true,
+      install: true,
+      uninstall: true,
+      "remove-orphans": true,
+      apply: true,
+      "rebalance-apply": false,
+      profile: undefined,
     },
   });
   if (parsedArgs.help) {
@@ -3852,12 +3939,23 @@ async function main() {
     Boolean(process.stdout.isTTY) &&
     process.env.TERM !== "dumb" &&
     process.env.CI !== "true";
+  // Detect explicit --yes/--no-yes
+  const yesExplicitlyPassed = process.argv.includes('--yes') || process.argv.includes('-y');
+  const noYesExplicitlyPassed = process.argv.includes('--no-yes');
+  const explicitYes = yesExplicitlyPassed && !noYesExplicitlyPassed;
+
   const interactive = parsedArgs.interactive || realTty;
-  const dryRunFallback = !interactive && !parsedArgs.yes;
+  const dryRunFallback = !interactive && !explicitYes;
   const dryRun = parsedArgs["dry-run"] || dryRunFallback;
-  const autoYes = !dryRun && (parsedArgs.yes || (!parsedArgs.interactive && realTty));
-  const cloudOnly = parsedArgs["cloud-only"];
-  const localOnly = parsedArgs["local-only"];
+  const autoYes = !dryRun && (explicitYes || parsedArgs["rebalance-apply"]);
+  const cloudOnlyFlag = parsedArgs["exclude-local"];
+  const localOnlyFlag = parsedArgs["exclude-cloud"];
+
+  if (cloudOnlyFlag && localOnlyFlag) {
+    console.error("Error: --cloud-only and --local-only are mutually exclusive");
+    process.exitCode = 1;
+    return;
+  }
   providerExclusionOptions.rateLimited = parsedArgs["exclude-rate-limited"];
   providerExclusionOptions.quotaRestricted = parsedArgs["exclude-quota-restricted"];
   const explicitModels = [parsedArgs.model]
@@ -3890,7 +3988,7 @@ async function main() {
     return;
   }
 
-  const needPrompt = !doRebalance && explicitModels.length === 0 && !autoYes && !dryRun && !localOnly;
+  const needPrompt = !doRebalance && explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
 
   // Start probing paid models in the background if we're not in local-only mode
   let paidProbesPromise = Promise.resolve([]);
@@ -3904,7 +4002,7 @@ async function main() {
   async function ensureProbesAwaited() {
     if (probesAwaited) return;
     probesAwaited = true;
-    if (!localOnly && paidProbesPromise) {
+    if (!localOnlyFlag && paidProbesPromise) {
       if (paidProbesEnabled) {
         const progress = createProgress("Verifying paid models availability");
         await paidProbesPromise;
@@ -3915,7 +4013,7 @@ async function main() {
     }
   }
 
-  if (!localOnly) {
+  if (!localOnlyFlag) {
     initialCache = loadProviderModels();
     initialAliases = buildProviderAliases(config);
     initialCloudLookup = buildRichModelLookup(initialCache);
@@ -3978,7 +4076,7 @@ async function main() {
   // GPU / Ollama detection is local integration and is skipped in cloud-only mode.
   let gpu;
   let ollama;
-  if (cloudOnly) {
+  if (cloudOnlyFlag) {
     createProgress("Checking GPU").skip("skipped by --cloud-only");
     createProgress("Checking Ollama").skip("skipped by --cloud-only");
     gpu = {
@@ -4007,13 +4105,13 @@ async function main() {
   // Local model catalog (skip if cloud-only, or if Ollama not installed)
   let allLocalModels = [];
   let localModelNames = [];
-  if (!cloudOnly && ollama.installed) {
+  if (!cloudOnlyFlag && ollama.installed) {
     const localProgress = createProgress("Discovering local model catalog");
     allLocalModels = discoverModels(false, localProgress);
     localModelNames = ollama.models.map((m) => m.name);
   } else {
     createProgress("Discovering local model catalog").skip(
-      cloudOnly ? "skipped by --cloud-only" : "Ollama not installed",
+      cloudOnlyFlag ? "skipped by --cloud-only" : "Ollama not installed",
     );
   }
 
@@ -4092,7 +4190,7 @@ async function main() {
     return;
   }
 
-  const skipCloud = localOnly;
+  const skipCloud = localOnlyFlag;
   let cache = null;
   if (skipCloud) {
     createProgress("Loading cloud provider cache").skip(
@@ -4117,8 +4215,29 @@ async function main() {
     : needPrompt
       ? initialCloudLookup
       : buildRichModelLookup(cache);
+
+  const excludeFreeExplicit = process.argv.includes('--exclude-free');
+  const noExcludeFreeExplicit = process.argv.includes('--no-exclude-free');
+  const freeConfigExplicit = process.argv.includes('--free-config');
+  const noFreeConfigExplicit = process.argv.includes('--no-free-config');
+
+  let excludeFreeFromConfig = false;
+  if (excludeFreeExplicit || noFreeConfigExplicit) {
+    excludeFreeFromConfig = true;
+  } else if (noExcludeFreeExplicit || freeConfigExplicit) {
+    excludeFreeFromConfig = false;
+  }
+
+  const cliOptions = {
+    excludeCodex: parsedArgs["exclude-codex"],
+    excludeAgy: parsedArgs["exclude-agy"],
+    excludeFree: excludeFreeFromConfig || parsedArgs["exclude-free"],
+    freePanel: parsedArgs["free-panel"],
+    noCache: !parsedArgs.cache,
+  };
+
   // Inject local models into cloud lookup for scoring context
-  if (!cloudOnly && localModelNames.length > 0) {
+  if (!cloudOnlyFlag && localModelNames.length > 0) {
     if (!cloudLookup.sets.local) cloudLookup.sets.local = new Set();
     localModelNames.forEach((m) => cloudLookup.sets.local.add(m));
     if (!cloudLookup.byId.local) cloudLookup.byId.local = new Map();
@@ -4133,7 +4252,7 @@ async function main() {
   ).length;
   
   // Count available CLI agents (installed AI CLIs)
-  const cliAgents = discoverCliModels(config);
+  const cliAgents = discoverCliModels(config, cliOptions);
   const installedCliCount = cliAgents.length;
   
   console.log(
@@ -4146,8 +4265,8 @@ async function main() {
   // unless set to "score").
   let aiResult;
   let panel = null;
-  const localCtx = cloudOnly ? [] : allLocalModels;
-  const gpuCtx = cloudOnly
+  const localCtx = cloudOnlyFlag ? [] : allLocalModels;
+  const gpuCtx = cloudOnlyFlag
     ? {
         hasGpu: false,
         name: "",
@@ -4155,12 +4274,12 @@ async function main() {
         vramGb: 0,
       }
     : gpu;
-  const ollamaCtx = cloudOnly
+  const ollamaCtx = cloudOnlyFlag
     ? { installed: false, running: false, version: null, models: [] }
     : ollama;
 
   // Check for cached panel result first (early cache prompt while background queries are running)
-  if (!autoYes && !dryRun) {
+  if (!autoYes && !dryRun && !cliOptions.noCache) {
     const cached = loadPanelCache();
     if (cached) {
       const age = Date.now() - cached.timestamp;
@@ -4226,17 +4345,17 @@ async function main() {
   if (!aiResult) {
     if (explicitModels.length > 0) {
       panelModels = filterPanelModelsForContext(explicitModels, cloudLookup);
-      panelModels = includeDetectedCliPanelModels(panelModels, config);
+      panelModels = includeDetectedCliPanelModels(panelModels, config, cliOptions);
       console.log(
         `  \u2713 Using ${panelModels.length} explicitly selected model(s): ${panelModels.join(", ")}\n`,
       );
       printCliPanelDisclosure(panelModels, "Explicit");
-    } else if (!autoYes && !dryRun && !localOnly) {
+    } else if (!autoYes && !dryRun && !localOnlyFlag) {
       // Discover available sources first
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
       const freeModels = discoverFreeModels();
-      const cliAgents = discoverCliModels(config);
+      const cliAgents = discoverCliModels(config, cliOptions);
       
       // Probe CLI agents to verify they work before including them
       const workingCliAgents = [];
@@ -4315,9 +4434,54 @@ async function main() {
       
       if (selectedModels.length > 0) {
         panelModels = filterPanelModelsForContext(selectedModels, cloudLookup);
-        panelModels = includeDetectedCliPanelModels(panelModels, config);
+        panelModels = includeDetectedCliPanelModels(panelModels, config, cliOptions);
         console.log(`  \u2713 Using ${panelModels.length} selected model(s)\n`);
         printCliPanelDisclosure(panelModels, "Selected");
+      }
+
+      // Explicit prompt for free model inclusion/exclusion
+      // Check if free models were selected (either explicitly via option 3, or via "all")
+      const freeModelsSelected = choices.includes("3") || choices.includes("a") || choices.length === 0 || (choices.includes("1") && choices.includes("2") && choices.includes("3"));
+      if (freeModelsSelected && freeModels.length > 0 && !autoYes && !dryRun) {
+        console.log("\n\uD83D\uDD0D Free models detected: " + freeModels.join(", "));
+        
+        // Prompt for AI Panel analysis (default Yes)
+        let includeInPanel = true;
+        const freePanelExplicit = process.argv.includes('--free-panel');
+        const noFreePanelExplicit = process.argv.includes('--no-free-panel');
+        if (noFreePanelExplicit) {
+          includeInPanel = false;
+        } else if (freePanelExplicit) {
+          includeInPanel = true;
+        } else {
+          includeInPanel = await confirm(
+            "Include free models in the AI Panel analysis? (Y/n) "
+          );
+        }
+        
+        // Prompt for JSONC configuration (default Yes)
+        let includeInConfig = !excludeFreeFromConfig;
+        if (!excludeFreeExplicit && !freeConfigExplicit && !noFreeConfigExplicit && !noExcludeFreeExplicit) {
+          includeInConfig = await confirm(
+            "Include free models in the JSONC configuration file? (Y/n) "
+          );
+        }
+        
+        // Filter panelModels based on user choices
+        const freeModelRefs = freeModels.filter(f => panelModels.includes(f));
+        if (!includeInPanel) {
+          // Remove free models from panelModels (AI Panel analysis)
+          panelModels = panelModels.filter(m => !freeModelRefs.includes(m));
+          console.log(`  \u2192 Free models excluded from AI Panel analysis`);
+        }
+        if (!includeInConfig) {
+          // Store the preference for later use in JSONC config
+          excludeFreeFromConfig = true;
+          console.log(`  \u2192 Free models will be excluded from JSONC configuration`);
+        } else {
+          excludeFreeFromConfig = false;
+          console.log(`  \u2192 Free models will be included in JSONC configuration`);
+        }
       }
     }
 
@@ -4325,7 +4489,7 @@ async function main() {
       const configuredModels = configuredPanelModels(config);
       if (configuredModels.length > 0) {
         panelModels = filterPanelModelsForContext(configuredModels, cloudLookup);
-        panelModels = includeDetectedCliPanelModels(panelModels, config);
+        panelModels = includeDetectedCliPanelModels(panelModels, config, cliOptions);
         console.log(
           `  \u2713 Using ${panelModels.length} configured panel model(s): ${panelModels.join(", ")}\n`,
         );
@@ -4333,18 +4497,20 @@ async function main() {
       }
     }
 
-    // Fallback to default if still not set (e.g., if autoYes, dryRun, or localOnly skipped prompt)
+    // Fallback to default if still not set (e.g., if autoYes, dryRun, or localOnlyFlag skipped prompt)
     if (!panelModels) {
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
-      if (availablePaid.length > 0 && !localOnly) {
+      if (availablePaid.length > 0 && !localOnlyFlag) {
         panelModels = selectPreferredPanelModels(
           availablePaid,
           config,
           cloudLookup,
+          MAX_PANEL_MODELS,
+          cliOptions,
         );
       } else {
-        panelModels = defaultPanelModels(config, cloudLookup);
+        panelModels = defaultPanelModels(config, cloudLookup, cliOptions);
         opencodeOnlyMode = true;
       }
     }
@@ -4353,6 +4519,50 @@ async function main() {
 
   try {
     if (!aiResult) {
+      // Transparency logs for model considerations and exclusions
+      console.log("\n── AI Panel Considerations & Exclusions ──");
+      if (cloudOnlyFlag) {
+        console.log("  • Local / Ollama models excluded via --exclude-local");
+      } else {
+        console.log("  • Local / Ollama models considered");
+      }
+
+      if (localOnlyFlag) {
+        console.log("  • Cloud / paid models excluded via --exclude-cloud");
+      } else {
+        console.log("  • Cloud / paid models considered");
+      }
+
+      if (cliOptions.noCache) {
+        console.log("  • Panel cache disabled via --no-cache");
+      } else {
+        console.log("  • Panel cache enabled");
+      }
+
+      if (cliOptions.excludeCodex) {
+        console.log("  • AI CLI agent cli/codex excluded via --exclude-codex");
+      } else {
+        console.log("  • AI CLI agent cli/codex considered");
+      }
+      if (cliOptions.excludeAgy) {
+        console.log("  • AI CLI agent cli/agy excluded via --exclude-agy");
+      } else {
+        console.log("  • AI CLI agent cli/agy considered");
+      }
+      
+      const noFreePanelExplicit = process.argv.includes('--no-free-panel');
+      if (noFreePanelExplicit) {
+        console.log("  • Free models excluded from AI Panel via --no-free-panel");
+      } else {
+        console.log("  • Free models considered for AI Panel");
+      }
+
+      if (excludeFreeFromConfig) {
+        console.log("  • Free models excluded from JSONC configuration");
+      } else {
+        console.log("  • Free models considered for JSONC configuration");
+      }
+      console.log("");
 
       // Ensure background paid model preparation has completed before running the panel.
       await ensureProbesAwaited();
@@ -4364,8 +4574,9 @@ async function main() {
         localCtx,
         gpuCtx,
         ollamaCtx,
-        cloudOnly,
+        cloudOnlyFlag,
         panelModels,
+        cliOptions,
       );
       aiResult = completeAiRecommendations(
         panelResult.selected,
@@ -4428,6 +4639,11 @@ async function main() {
     return;
   }
 
+  if (!parsedArgs.apply) {
+    console.log("  \u2192 Apply skipped via --no-apply\n");
+    return;
+  }
+
   if (dryRun) {
     console.log(`\n   \u2192 Apply: omo-recommend-models\n`);
     return;
@@ -4451,6 +4667,8 @@ async function main() {
     aiResult.localModels?.decisions,
     ollama,
     autoYes,
+    !parsedArgs.install,
+    !parsedArgs.uninstall,
   );
 
   // Apply model assignments after filtering out unconfirmed local refs.
@@ -4467,9 +4685,13 @@ async function main() {
         (confirmedModels &&
           confirmedModels.has(normalizeLocalModelName(r.model)));
 
-      const modelOk = rec.model && localOk(rec.model);
-      const routingOk = (rec.routing || []).filter(localOk);
-      const fbOk = (rec.fallback_models || []).filter(localOk);
+      // Filter free models from JSONC config if user chose to exclude them
+      const freeOk = (r) =>
+        !excludeFreeFromConfig || r.provider !== "opencode";
+
+      const modelOk = rec.model && localOk(rec.model) && freeOk(rec.model);
+      const routingOk = (rec.routing || []).filter(r => localOk(r) && freeOk(r));
+      const fbOk = (rec.fallback_models || []).filter(r => localOk(r) && freeOk(r));
 
       if (!modelOk && routingOk.length === 0 && fbOk.length === 0) continue;
 
@@ -4545,7 +4767,12 @@ async function main() {
   }
 
   // Step 4: Offer to remove models the AI never considered
-  await offerUninstallOrphans(aiResult.localModels?.decisions, ollama, autoYes);
+  await offerUninstallOrphans(
+    aiResult.localModels?.decisions,
+    ollama,
+    autoYes,
+    !parsedArgs["remove-orphans"],
+  );
 
   console.log("\n\u2705 Done.");
 }
