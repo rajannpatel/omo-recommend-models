@@ -25,7 +25,6 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import {
   getConfigPath,
-  getBackupPath,
   pickFreeModel,
   discoverFreeModels as originalDiscoverFreeModels,
   callOpencodeChat,
@@ -63,14 +62,11 @@ import {
   MODEL_SCORES,
   BASE_VRAM,
 } from "../lib/constants.js";
-import {
-  backupConfig,
-  writeConfigWithValidation,
-} from "../lib/recommend/apply.js";
 import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
 import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
 import { preparePaidProviderModels } from "../lib/recommend/paid-provider-prep.js";
 import { discoverLocalEnvironment } from "../lib/recommend/local-environment.js";
+import { runRebalanceFlow } from "../lib/recommend/rebalance-flow.js";
 import {
   panelModelFamilyLabel,
   printNumberedPanelModelGroups,
@@ -107,13 +103,10 @@ import {
   installedLocalNameSet,
 } from "../lib/apply-local.js";
 import {
-  buildTierChains,
   fbToString,
   applyTierChain,
   findModelInCache,
   rebalanceEntry,
-  rebalanceConfig,
-  showRebalance,
 } from "../lib/rebalance.js";
 import {
   CLI_VERSION,
@@ -2134,76 +2127,14 @@ async function main() {
 
   // ── Algorithmic --rebalance path ──
   if (doRebalance) {
-    const cache = loadProviderModels();
-    const aliases = buildProviderAliases(config);
-    const richLookup = buildRichModelLookup(cache);
-    // Include local models in lookup for scoring
-    if (localModelNames.length > 0) {
-      if (!richLookup.sets.local) richLookup.sets.local = new Set();
-      localModelNames.forEach((m) => richLookup.sets.local.add(m));
-      if (!richLookup.byId.local) richLookup.byId.local = new Map();
-      localModelNames.forEach((m) => {
-        if (!richLookup.byId.local.has(m)) richLookup.byId.local.set(m, null);
-      });
-    }
-    showRebalance(config, richLookup, aliases, localModelNames);
-
-    const tierChains = buildTierChains(richLookup, aliases);
-    const rebalanceOptions = {
-      unavailableModels: new Set(),
-      providerAliases: aliases,
-      modelCache: richLookup,
-      tierChains,
-    };
-    const rebalanceChanges = rebalanceConfig(config, rebalanceOptions);
-
-    if (rebalanceChanges.length === 0) {
-      console.log("\n\u2705 No restructuring needed.\n");
-      return;
-    }
-    console.log(
-      `\n\uD83D\uDCCB ${rebalanceChanges.length} section(s) would be restructured:\n`,
-    );
-    for (const c of rebalanceChanges) console.log(`  ${c}`);
-    if (dryRun) {
-      console.log(`\n   \u2192 Apply: omo-recommend-models --rebalance\n`);
-      return;
-    }
-    if (!autoYes) {
-      const ok = await confirm(
-        `Apply ${rebalanceChanges.length} changes? (y/N) `,
-      );
-      if (!ok) {
-        console.log("  Skipped.\n");
-        return;
-      }
-    }
-    if (backupConfig(getConfigPath(), getBackupPath())) {
-      console.log(`  \u2713 Backup saved to ${getBackupPath()}`);
-    }
-    console.log(`  Backup: ${getBackupPath()}`);
-    try {
-      writeConfigWithValidation({
-        config,
-        configPath: getConfigPath(),
-        backupPath: getBackupPath(),
-        validatorPath: path.join(__dirname, "omo-validate-config"),
-        validateStdio: "inherit",
-      });
-      console.log(`\u2705 ${rebalanceChanges.length} section(s) restructured.\n`);
-    } catch (validationErr) {
-      console.error(`\n\u2716 Validation FAILED.`);
-      if (fs.existsSync(getBackupPath())) {
-        console.log(
-          `  \u2713 Reverted to previous config (backup at ${getBackupPath()})`,
-        );
-      } else {
-        console.log(
-          `  \u26A0 No backup found at ${getBackupPath()} \u2014 config on disk may be invalid.`,
-        );
-      }
-      throw validationErr;
-    }
+    await runRebalanceFlow({
+      config,
+      localModelNames,
+      dryRun,
+      autoYes,
+      confirm,
+      validatorPath: path.join(__dirname, "omo-validate-config"),
+    });
     return;
   }
 
