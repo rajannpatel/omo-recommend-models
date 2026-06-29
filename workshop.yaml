@@ -4,10 +4,10 @@ base: ubuntu@26.04
 sdks:
   - name: opencode
     channel: latest/stable
-    slots:
-      opencode-bridge:
-        interface: tunnel
-        endpoint: localhost:3000/tcp
+    # slots:
+    #   opencode-bridge:
+    #     interface: tunnel
+    #     endpoint: localhost:3000/tcp
   - name: uv
     channel: latest/stable
   - name: project-tools
@@ -15,19 +15,19 @@ sdks:
     channel: latest/stable
   - name: codex
     channel: latest/stable
-  - name: ollama
-    channel: cuda/stable
+  # - name: ollama
+  #   channel: cuda/stable
   - name: node
     channel: 24
-  - name: system
-    plugs:
-      opencode-bridge:
-        interface: tunnel
-        endpoint: localhost:3000/tcp
+  # - name: system
+  #   plugs:
+  #     opencode-bridge:
+  #       interface: tunnel
+  #       endpoint: localhost:3000/tcp
 
-connections:
-  - plug: opencode:opencode-config
-    slot: system:mount
+# connections:
+#   - plug: opencode:opencode-config
+#     slot: system:mount
 
 actions:
   context: |
