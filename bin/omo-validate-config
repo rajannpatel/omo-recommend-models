@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
 import {
   getConfigPath,
   CACHE_DIR,
@@ -13,9 +11,6 @@ import {
   buildRichModelLookup,
   discoverLocalModels,
 } from '../lib/omo-shared.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 
 const DEFAULT_SCHEMA =

@@ -20,7 +20,8 @@
     "lib"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "eslint 'bin/*' 'lib/**/*.js'"
   },
   "dependencies": {
     "@clack/prompts": "^0.7.0",

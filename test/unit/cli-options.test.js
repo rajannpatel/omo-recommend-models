@@ -51,7 +51,7 @@ test("parseCliOptions preserves negated option intent", () => {
 test("parseCliOptions exposes help and version flags without exiting", () => {
   assert.equal(parseCliOptions(["--help"]).help, true);
   assert.equal(parseCliOptions(["-v"]).version, true);
-  assert.equal(CLI_VERSION, "1.0.0");
+  assert.equal(CLI_VERSION, "1.2.3");
   assert.match(usage(), /^Usage: omo-recommend-models \[options\]/);
 });
 

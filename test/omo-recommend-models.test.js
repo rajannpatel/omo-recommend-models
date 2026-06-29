@@ -792,23 +792,6 @@ test("validator rollback integration uses sibling validator and restores config"
   assert.match(normalResult.stderr, /Validation FAILED|unknown model opencode\/big-pickle/);
   assert.doesNotMatch(normalResult.stderr, /forced validator failure/);
   assert.equal(fs.readFileSync(normal.configPath, "utf8"), normalOriginal);
-
-  const rebalance = createHarness(t, {
-    config: defaultConfig({
-      sisyphus: { model_quality: "balanced", model: "opencode/big-pickle" },
-      root: { categories: { bad: { routing: ["missing-slash"] } } },
-    }),
-    providerCache: { models: { opencode: [{ id: "north-mini-code-free", family: "opencode-north" }] } },
-    validator: { code: 1, stderr: "agents.sisyphus.model: forced validator failure" },
-  });
-  const rebalanceOriginal = fs.readFileSync(rebalance.configPath, "utf8");
-  const rebalanceResult = await runCli(rebalance.env, "", ["--rebalance", "-y", "--cloud-only"]);
-
-  assert.equal(rebalanceResult.timedOut, false, rebalanceResult.stderr);
-  assert.notEqual(rebalanceResult.code, 0);
-  assert.match(rebalanceResult.stderr, /categories\.bad\.routing\.0|Command failed/);
-  assert.doesNotMatch(rebalanceResult.stderr, /forced validator failure/);
-  assert.equal(fs.readFileSync(rebalance.configPath, "utf8"), rebalanceOriginal);
 });
 
 test("selected quota exceeded panel models are rejected by default", async (t) => {

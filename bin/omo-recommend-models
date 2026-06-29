@@ -17,99 +17,28 @@
  */
 
 import fs from "node:fs";
-import path from "node:path";
-import readline from "node:readline";
-import { execFileSync, execSync, spawn } from "node:child_process";
-import os from "node:os";
+import path, { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import {
   getConfigPath,
-  pickFreeModel,
   discoverFreeModels as originalDiscoverFreeModels,
-  callOpencodeChat,
-  parseAiJson,
   loadConfig,
   loadProviderModels,
-  buildProviderAliases,
-  resolveProvider,
-  normalizeLocalModelName,
-  formatModelRef,
-  modelRef,
-  splitModelRef,
   buildRichModelLookup,
 } from "../lib/omo-shared.js";
-import {
-  detectFamilyFromMeta,
-  scoreModelFromMeta,
-  scoreFromCache,
-  scoreFromHeuristics,
-  scoreModel,
-  panelModelOrder,
-  sortPanelModelRefs,
-} from "../lib/scoring.js";
-import {
-  LOCAL_PROVIDER,
-  FREE_PROVIDERS,
-  QUALITY_TIERS,
-  MAX_PANEL_MODELS,
-  MIN_PANEL_CONTEXT_TOKENS,
-  MODEL_CACHE_FILE,
-  PANEL_CACHE_FILE,
-  modelListEquals,
-  isSubsetList,
-  KNOWN_MODELS,
-  MODEL_SCORES,
-  BASE_VRAM,
-} from "../lib/constants.js";
+import { LOCAL_PROVIDER } from "../lib/constants.js";
 import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
 import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
 import { preparePaidProviderModels } from "../lib/recommend/paid-provider-prep.js";
 import { discoverLocalEnvironment } from "../lib/recommend/local-environment.js";
-import { runRebalanceFlow } from "../lib/recommend/rebalance-flow.js";
 import { completeAiRecommendations } from "../lib/recommend/recommendation-finalizer.js";
 import { runPanelAndSelect } from "../lib/recommend/panel-core.js";
 import {
-  panelModelFamilyLabel,
-  printNumberedPanelModelGroups,
-  printSelectablePanelModelGroups,
   selectedPanelRequiresOpencode,
-  opencodePanelModelsFromLookup,
   defaultPanelModels as defaultPanelModelsImpl,
   createProgress,
-  usableLocalVramGb,
-  buildFittingModels,
-  buildFittingModelMap,
-  resolveFittingLocalName,
-  normalizeLocalRecommendation,
-  normalizeAgentRec,
-  normalizeRecommendation,
 } from "../lib/display-utils.js";
-import {
-  providerState,
-  isProviderAvailable,
-  markProviderCreditExhausted,
-  markProviderRateLimited,
-  probeModel,
-  parseRetryAfterSeconds,
-  compactErrorText,
-  killChild,
-} from "../lib/probe-providers.js";
-import {
-  allConfigEntries,
-  uniqueByModelRef,
-  finalizeFallbackModels,
-  computeConsensus,
-} from "../lib/consensus.js";
-import {
-  installedLocalNameSet,
-} from "../lib/apply-local.js";
-import {
-  fbToString,
-  applyTierChain,
-  findModelInCache,
-  rebalanceEntry,
-} from "../lib/rebalance.js";
+import { isProviderAvailable } from "../lib/probe-providers.js";
 import {
   CLI_VERSION,
   parseCliOptions,
@@ -117,21 +46,9 @@ import {
 } from "../lib/cli-options.js";
 import { createCliRuntime } from "../lib/cli-runtime.js";
 import {
-  isCliProvider,
-  cloudModelMeta,
-  contextTokenLimit,
   hasEnoughContextForPanel,
-  panelCandidateFamily,
-  isPanelCandidateUsable,
-  hasPanelCandidateShapeAndContext,
-  uniqueModelRefs,
-  sortedPanelCandidates,
-  selectDiversePanelModels,
   filterUsablePanelModels as filterUsablePanelModelsImpl,
   filterPanelModelsForContext,
-  isUsableRecommendation,
-  isUsableForConfig,
-  describeCliPanelModel,
   printCliPanelDisclosure,
 } from "../lib/recommend/panel-candidates.js";
 import { discoverModels as discoverModelsFromRegistry } from "../lib/recommend/ollama-registry.js";
@@ -167,10 +84,6 @@ function discoverFreeModels(options = {}) {
 
 const runtime = createCliRuntime();
 const { ctx, subprocess } = runtime;
-
-function terminateActiveChildren() {
-  runtime.terminateActiveChildren();
-}
 
 function installSignalHandlers() {
   runtime.installSignalHandlers();
@@ -208,10 +121,6 @@ function commandExists(binary) {
 
 // =========================================================================
 // GPU / Ollama detection — extracted to lib/recommend/hardware-detection.js
-// =========================================================================
-
-// =========================================================================
-// Tier chain construction + rebalance (algorithmic path)
 // =========================================================================
 
 // =========================================================================
@@ -378,7 +287,6 @@ async function main() {
     console.log(CLI_VERSION);
     return;
   }
-  const doRebalance = parsedArgs.rebalance;
   ctx.debugMode = parsedArgs.debug;
   const realTty =
     Boolean(process.stdout.isTTY) &&
@@ -389,7 +297,7 @@ async function main() {
   const interactive = parsedArgs.interactive || realTty;
   const dryRunFallback = !interactive && !explicitYes;
   const dryRun = parsedArgs["dry-run"] || dryRunFallback;
-  const autoYes = !dryRun && (explicitYes || parsedArgs["rebalance-apply"]);
+  const autoYes = !dryRun && explicitYes;
   const cloudOnlyFlag = parsedArgs["exclude-local"];
   const localOnlyFlag = parsedArgs["exclude-cloud"];
 
@@ -415,7 +323,6 @@ async function main() {
   const config = loadConfig();
 
   if (
-    !doRebalance &&
     selectedPanelRequiresOpencode(config, explicitModels) &&
     !commandExists("opencode")
   ) {
@@ -430,7 +337,7 @@ async function main() {
     return;
   }
 
-  const needPrompt = !doRebalance && explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
+  const needPrompt = explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
 
   const paidProviderPrep = preparePaidProviderModels({
     config,
@@ -441,7 +348,6 @@ async function main() {
   });
   const {
     initialCache,
-    initialAliases,
     initialCloudLookup,
     paidProbesPromise,
     ensureProbesAwaited,
@@ -460,19 +366,6 @@ async function main() {
       discoverModelsFromRegistry(forceRefresh, progress, subprocess.fetchUrl.bind(subprocess)),
   });
 
-  // ── Algorithmic --rebalance path ──
-  if (doRebalance) {
-    await runRebalanceFlow({
-      config,
-      localModelNames,
-      dryRun,
-      autoYes,
-      confirm,
-      validatorPath: path.join(__dirname, "omo-validate-config"),
-    });
-    return;
-  }
-
   const skipCloud = localOnlyFlag;
   let cache = null;
   if (skipCloud) {
@@ -488,11 +381,6 @@ async function main() {
         : "not found",
     );
   }
-  const aliases = skipCloud
-    ? {}
-    : needPrompt
-      ? initialAliases
-      : buildProviderAliases(config);
   const cloudLookup = skipCloud
     ? { byId: {}, sets: {} }
     : needPrompt
