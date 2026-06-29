@@ -70,6 +70,7 @@ import {
 import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
 import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
 import { preparePaidProviderModels } from "../lib/recommend/paid-provider-prep.js";
+import { discoverLocalEnvironment } from "../lib/recommend/local-environment.js";
 import {
   panelModelFamilyLabel,
   printNumberedPanelModelGroups,
@@ -2119,47 +2120,17 @@ async function main() {
     ensureProbesAwaited,
   } = paidProviderPrep;
 
-  // GPU / Ollama detection is local integration and is skipped in cloud-only mode.
-  let gpu;
-  let ollama;
-  if (cloudOnlyFlag) {
-    createProgress("Checking GPU").skip("skipped by --cloud-only");
-    createProgress("Checking Ollama").skip("skipped by --cloud-only");
-    gpu = {
-      hasGpu: false,
-      name: "",
-      label: "Not checked (--cloud-only)",
-      vramGb: 0,
-    };
-    ollama = { installed: false, running: false, version: null, models: [] };
-  } else {
-    const gpuProgress = createProgress("Checking GPU");
-    gpu = detectGPU();
-    gpuProgress.done(gpu.label);
-
-    const ollamaProgress = createProgress("Checking Ollama");
-    ollama = detectOllama();
-    ollamaProgress.done(
-      ollama.running
-        ? `${ollama.models.length} installed model(s)`
-        : ollama.installed
-          ? "installed, not running"
-          : "not installed",
-    );
-  }
-
-  // Local model catalog (skip if cloud-only, or if Ollama not installed)
-  let allLocalModels = [];
-  let localModelNames = [];
-  if (!cloudOnlyFlag && ollama.installed) {
-    const localProgress = createProgress("Discovering local model catalog");
-    allLocalModels = discoverModels(false, localProgress);
-    localModelNames = ollama.models.map((m) => m.name);
-  } else {
-    createProgress("Discovering local model catalog").skip(
-      cloudOnlyFlag ? "skipped by --cloud-only" : "Ollama not installed",
-    );
-  }
+  const {
+    gpu,
+    ollama,
+    allLocalModels,
+    localModelNames,
+  } = discoverLocalEnvironment({
+    cloudOnlyFlag,
+    detectGPU,
+    detectOllama,
+    discoverModels,
+  });
 
   // ── Algorithmic --rebalance path ──
   if (doRebalance) {
