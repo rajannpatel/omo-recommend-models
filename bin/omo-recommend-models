@@ -26,8 +26,8 @@ import { dirname } from "node:path";
 import mri from "mri";
 import pc from "picocolors";
 import {
-  CONFIG_PATH,
-  BACKUP_PATH,
+  getConfigPath,
+  getBackupPath,
   confirm as plainConfirm,
   promptUser as plainPromptUser,
   pickFreeModel,
@@ -40,16 +40,110 @@ import {
   resolveProvider,
   normalizeLocalModelName,
   formatModelRef,
+  modelRef,
+  splitModelRef,
   buildRichModelLookup,
 } from "../lib/omo-shared.js";
+import {
+  detectFamilyFromMeta,
+  scoreModelFromMeta,
+  scoreFromCache,
+  scoreFromHeuristics,
+  scoreModel,
+  panelModelOrder,
+  sortPanelModelRefs,
+} from "../lib/scoring.js";
+import {
+  LOCAL_PROVIDER,
+  FREE_PROVIDERS,
+  QUALITY_TIERS,
+  MAX_PANEL_MODELS,
+  MIN_PANEL_CONTEXT_TOKENS,
+  MODEL_CACHE_FILE,
+  PANEL_CACHE_FILE,
+  loadPanelCache,
+  savePanelCache,
+  modelListEquals,
+  isSubsetList,
+  KNOWN_MODELS,
+  MODEL_SCORES,
+  BASE_VRAM,
+} from "../lib/constants.js";
+import { RuntimeContext } from "../lib/runtime-context.js";
+import { SubprocessRunner } from "../lib/subprocess.js";
 import {
   backupConfig,
   writeConfigWithValidation,
 } from "../lib/recommend/apply.js";
+import {
+  panelModelFamilyLabel,
+  groupPanelModelRefs,
+  printNumberedPanelModelGroups,
+  printSelectablePanelModelGroups,
+  configuredPanelModels,
+  panelModelsRequireOpencode,
+  selectedPanelRequiresOpencode,
+  opencodePanelModelsFromLookup,
+  defaultPanelModels as defaultPanelModelsImpl,
+  plannedPanelModels,
+  createProgress,
+  usableLocalVramGb,
+  buildFittingModels,
+  buildFittingModelMap,
+  resolveFittingLocalName,
+  normalizeLocalRecommendation,
+  resultHasRejectedLocal,
+  normalizeAgentRec,
+  normalizeRecommendation,
+  setProgressClackState,
+} from "../lib/display-utils.js";
+import {
+  providerState,
+  isProviderAvailable,
+  shouldProbeProviderAvailability,
+  markProviderCreditExhausted,
+  markProviderRateLimited,
+  probeModel,
+  parseRetryAfterSeconds,
+  compactErrorText,
+  killChild,
+} from "../lib/probe-providers.js";
+import {
+  allConfigEntries,
+  uniqueByModelRef,
+  finalizeFallbackModels,
+  computeConsensus,
+} from "../lib/consensus.js";
+import {
+  pullModel,
+  applyCloudChanges,
+  applyLocalPlacements,
+  installAndUninstallModels,
+  offerUninstallOrphans,
+  installedLocalNameSet,
+} from "../lib/apply-local.js";
+import {
+  buildTierChains,
+  fbToString,
+  applyTierChain,
+  findModelInCache,
+  rebalanceEntry,
+  rebalanceConfig,
+  showRebalance,
+} from "../lib/rebalance.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const VERSION = "1.0.0";
+
+// Wrapper that injects monolith-local dependency functions into extracted defaultPanelModels
+function defaultPanelModels(config, cloudLookup = null, options = {}) {
+  return defaultPanelModelsImpl(config, cloudLookup, {
+    ...options,
+    _discoverFreeModels: discoverFreeModels,
+    _preferDetectedCliPanelModels: preferDetectedCliPanelModels,
+  });
+}
 
 function discoverFreeModels() {
   if (process.argv.includes('--no-free-panel')) {
@@ -58,10 +152,8 @@ function discoverFreeModels() {
   return originalDiscoverFreeModels();
 }
 
-const activeChildren = new Set();
-let clack = null;
-let useClackPrompts = false;
-let debugMode = false;
+const ctx = new RuntimeContext();
+const subprocess = new SubprocessRunner(ctx);
 
 function usage() {
   return [
@@ -100,69 +192,27 @@ function usage() {
   ].join("\n");
 }
 
-function registerChild(child) {
-  activeChildren.add(child);
-  child.once("exit", () => activeChildren.delete(child));
-  child.once("error", () => activeChildren.delete(child));
-  return child;
-}
-
-function spawnTracked(command, args, options) {
-  return registerChild(spawn(command, args, options));
-}
-
-// AbortController for graceful cancellation
-let abortController = new AbortController();
-let abortSignal = abortController.signal;
-
 function terminateActiveChildren() {
-  const children = [...activeChildren].filter(
-    (child) => child.exitCode === null && child.signalCode === null,
-  );
-  for (const child of children) {
-    try {
-      child.kill("SIGTERM");
-    } catch {}
-  }
-  setTimeout(() => {
-    for (const child of children) {
-      if (child.exitCode === null && child.signalCode === null) {
-        try {
-          child.kill("SIGKILL");
-        } catch {}
-      }
-    }
-    process.exit(1);
-  }, 2000).unref();
+  ctx.terminateActiveChildren();
 }
 
 function installSignalHandlers() {
-  let handlingSignal = false;
-  const handler = (signal) => {
-    if (handlingSignal) return;
-    handlingSignal = true;
-    process.stderr.write(`\n${signal} received; terminating subprocesses...\n`);
-    // Abort all pending operations
-    abortController.abort();
-    terminateActiveChildren();
-  };
-  process.once("SIGINT", handler);
-  process.once("SIGTERM", handler);
+  ctx.installSignalHandlers();
 }
 
 async function configureTerminalUi(enabled) {
-  useClackPrompts = Boolean(enabled);
-  if (!useClackPrompts) return;
+  ctx.useClackPrompts = Boolean(enabled);
+  if (!ctx.useClackPrompts) return;
   try {
-    clack = await import("@clack/prompts");
+    ctx.clack = await import("@clack/prompts");
   } catch {
-    clack = null;
+    ctx.clack = null;
   }
 }
 
 async function confirm(question) {
-  if (useClackPrompts && clack?.confirm) {
-    const answer = await clack.confirm({
+  if (ctx.useClackPrompts && ctx.clack?.confirm) {
+    const answer = await ctx.clack.confirm({
       message: question.replace(/\s*\([^)]+\)\s*$/, "").trim(),
       initialValue: false,
     });
@@ -172,8 +222,8 @@ async function confirm(question) {
 }
 
 async function promptUser(question) {
-  if (useClackPrompts && clack?.text) {
-    const answer = await clack.text({ message: question.trim() });
+  if (ctx.useClackPrompts && ctx.clack?.text) {
+    const answer = await ctx.clack.text({ message: question.trim() });
     return typeof answer === "string" ? answer.trim() : "";
   }
   return plainPromptUser(question);
@@ -194,732 +244,9 @@ function commandExists(binary) {
   return "";
 }
 
-// =========================================================================
-// Model scoring constants (from omo-recommend-cloud)
-// =========================================================================
 
-// FAMILY_TIERS removed - scoring now uses generic metadata signals:
-// - capabilities (reasoning, code, vision)
-// - context length
-// - cost (input/output price)
-// - release date (recency)
-// - variant tier (xhigh, max, high, medium, low)
-// Provider prestige removed - all providers treated equally
 
-const VARIANT_BONUS = { xhigh: 10, max: 8, high: 5, medium: 0, low: -5 };
-const LOCAL_PROVIDER = "local";
-const FREE_PROVIDERS = ["opencode", LOCAL_PROVIDER];
-const QUALITY_TIERS = ["reasoning", "balanced", "fast"];
-const MAX_PANEL_MODELS = 5;
-const MIN_PANEL_CONTEXT_TOKENS = Math.max(
-  32000,
-  Number.parseInt(process.env.OMO_PANEL_MIN_CONTEXT_TOKENS || "32000", 10) ||
-  32000,
-);
-let cachedAgyPanelModel = undefined;
-const quotaExceededProviders = new Set();
-const providerAvailability = new Map();
-const providerExclusionOptions = {
-  quotaRestricted: false,
-  rateLimited: false,
-};
-let opencodeOnlyMode = false;
-const providerProbePromises = new Map();
-
-// =========================================================================
-// Generic family detection from metadata (replaces hardcoded FAMILY_TIERS)
-// =========================================================================
-
-function detectFamilyFromMeta(meta, modelName) {
-  // Safely get capabilities as array
-  let caps = [];
-  if (meta && meta.capabilities) {
-    if (Array.isArray(meta.capabilities)) {
-      caps = meta.capabilities;
-    } else if (typeof meta.capabilities === 'string') {
-      caps = [meta.capabilities];
-    }
-  }
-  caps = caps.map(c => String(c).toLowerCase());
-  
-  const family = (meta?.family || "").toLowerCase();
-  const name = (modelName || "").toLowerCase();
-  
-  // Detect reasoning capability
-  const hasReasoning = caps.some(c => c.includes("reasoning"));
-  
-  // Detect model tier from context length and capabilities
-  const ctx = meta?.context_length || meta?.context_window || 0;
-  const isLargeContext = ctx > 100000;
-  const isMediumContext = ctx > 32000;
-  
-  // Generic tier scoring based on metadata
-  let baseScore = 0;
-  if (hasReasoning) baseScore += 20;
-  if (isLargeContext) baseScore += 10;
-  else if (isMediumContext) baseScore += 5;
-  
-  // Cost penalty (lower cost = higher score for free models)
-  const cost = meta?.cost || meta?.input_price || 0;
-  if (typeof cost === "number" && !isNaN(cost)) {
-    if (cost === 0) baseScore += 15; // Free models get bonus
-    else baseScore -= Math.min(cost * 10, 10);
-  }
-  
-  // Recency bonus
-  if (meta?.release_date) {
-    const d = new Date(meta.release_date);
-    const epochDays = Math.floor(d.getTime() / 86400000);
-    if (!isNaN(epochDays)) {
-      baseScore += Math.max(0, epochDays - 20000) * 2;
-    }
-  }
-  
-  return { family, name, baseScore, hasReasoning, ctx, cost };
-}
-
-function scoreModelFromMeta(model, variant, meta) {
-  const detected = detectFamilyFromMeta(meta, model);
-  let score = detected.baseScore;
-  
-  // Variant bonus
-  if (variant && VARIANT_BONUS[variant] !== undefined) {
-    score += VARIANT_BONUS[variant];
-  }
-  
-  // Model name heuristics for tier detection (generic, not vendor-specific)
-  const lower = model.toLowerCase();
-  if (lower.includes("opus") || lower.includes("pro") || lower.includes("ultra") || lower.includes("max") || lower.includes("large")) {
-    score += 14;
-  } else if (lower.includes("sonnet") || lower.includes("flash") || lower.includes("plus") || lower.includes("advanced")) {
-    score += 8;
-  } else if (lower.includes("haiku") || lower.includes("mini") || lower.includes("nano") || lower.includes("small") || lower.includes("lite")) {
-    score += 3;
-  }
-  if (lower.includes("reasoning") || lower.includes("think")) score += 10;
-  
-  // Size detection from model name (e.g., "70b", "32b", "7b")
-  const sizeMatch = lower.match(/(\d+)b/);
-  if (sizeMatch) {
-    const size = parseInt(sizeMatch[1]);
-    if (size >= 70) score += 20;
-    else if (size >= 30) score += 15;
-    else if (size >= 13) score += 10;
-    else if (size >= 7) score += 5;
-  }
-  
-  return isNaN(score) ? 0 : score;
-}
-
-// =========================================================================
-// Local model constants (from omo-recommend-local)
-// =========================================================================
-
-const MODEL_CACHE_FILE = path.join(
-  os.homedir(),
-  ".cache",
-  "oh-my-opencode",
-  "ollama-models.json",
-);
-
-const PANEL_CACHE_FILE = path.join(
-  os.homedir(),
-  ".cache",
-  "oh-my-opencode",
-  "panel-cache.json",
-);
-
-function loadPanelCache() {
-  try {
-    if (!fs.existsSync(PANEL_CACHE_FILE)) return null;
-    const raw = fs.readFileSync(PANEL_CACHE_FILE, "utf-8");
-    const data = JSON.parse(raw);
-    if (!data || !data.timestamp || !data.result) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-function savePanelCache(result, panelModels, gpuInfo) {
-  try {
-    const dir = path.dirname(PANEL_CACHE_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const gpu = gpuInfo
-      ? {
-          hasGpu: !!gpuInfo.hasGpu,
-          name: gpuInfo.name || "",
-          label: gpuInfo.label || "",
-          vramGb: gpuInfo.vramGb || 0,
-        }
-      : null;
-    fs.writeFileSync(
-      PANEL_CACHE_FILE,
-      JSON.stringify(
-        {
-          timestamp: Date.now(),
-          models: panelModels || null,
-          gpu,
-          result,
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
-  } catch {
-    /* cache write failure is non-fatal */
-  }
-}
-
-function modelListEquals(a, b) {
-  if (!a || !b) return false;
-  if (a.length !== b.length) return false;
-  const sa = [...a].sort();
-  const sb = [...b].sort();
-  return sa.every((v, i) => v === sb[i]);
-}
-
-function isSubsetList(superset, subset) {
-  if (!superset || !subset) return false;
-  const ss = new Set(superset);
-  return subset.every((m) => ss.has(m));
-}
-
-const KNOWN_MODELS = [
-  { name: "llama3.2", tags: ["1b", "3b"] },
-  { name: "llama3.1", tags: ["8b", "70b", "405b"] },
-  { name: "llama3", tags: ["8b", "70b", "405b"] },
-  { name: "qwen2.5-coder", tags: ["1.5b", "7b", "14b", "32b"] },
-  { name: "qwen2.5", tags: ["7b", "14b", "32b", "72b"] },
-  { name: "deepseek-coder-v2", tags: ["16b"] },
-  { name: "codegemma", tags: ["2b", "7b"] },
-  { name: "codellama", tags: ["7b", "13b", "34b", "70b"] },
-  { name: "mistral", tags: ["7b"] },
-  { name: "mixtral", tags: ["8x7b", "8x22b"] },
-  { name: "phi3", tags: ["3.8b", "7b", "14b"] },
-  { name: "gemma2", tags: ["2b", "9b", "27b"] },
-  { name: "nomic-embed-text", tags: ["v1.5"] },
-  { name: "mxbai-embed-large", tags: ["v1"] },
-  { name: "llama3.2-vision", tags: ["11b", "90b"] },
-  { name: "llava", tags: ["7b", "13b", "34b"] },
-  { name: "bakllava", tags: ["7b"] },
-  { name: "starcoder2", tags: ["3b", "7b", "15b"] },
-  { name: "dolphin-mixtral", tags: ["8x7b"] },
-  { name: "neural-chat", tags: ["7b"] },
-  { name: "orca-mini", tags: ["3b", "7b"] },
-  { name: "tinyllama", tags: ["1.1b"] },
-  { name: "falcon3", tags: ["1b", "3b", "7b", "10b"] },
-  {
-    name: "command-r",
-    tags: ["7b", "7b-08-2024", "v01", "35b-08-2024", "104b"],
-  },
-  { name: "llama-guard3", tags: ["1b", "8b"] },
-  { name: "nemotron", tags: ["mini-4b-instruct"] },
-  {
-    name: "deepseek-r1",
-    tags: ["1.5b", "7b", "8b", "14b", "32b", "70b", "671b"],
-  },
-  { name: "qwq", tags: ["32b"] },
-];
-
-const MODEL_SCORES = {
-  "deepseek-coder-v2": 95,
-  "qwen2.5-coder": 92,
-  "llama3.1": 88,
-  llama3: 86,
-  codellama: 82,
-  codegemma: 78,
-  mixtral: 76,
-  "deepseek-r1": 74,
-  qwq: 72,
-  "qwen2.5": 70,
-  mistral: 68,
-  starcoder2: 66,
-  falcon3: 64,
-  "llama3.2": 62,
-  gemma2: 60,
-  "command-r": 58,
-  phi3: 55,
-  "dolphin-mixtral": 52,
-  "neural-chat": 48,
-  "orca-mini": 42,
-  nemotron: 40,
-  "llama-guard3": 35,
-  tinyllama: 30,
-  "mxbai-embed-large": 20,
-  "nomic-embed-text": 18,
-  "llama3.2-vision": 70,
-  llava: 62,
-  bakllava: 55,
-};
-
-const BASE_VRAM = {
-  "deepseek-coder-v2": 16,
-  "qwen2.5-coder": 7,
-  "llama3.1": 8,
-  llama3: 8,
-  codellama: 7,
-  codegemma: 7,
-  mixtral: 47,
-  "deepseek-r1": 7,
-  qwq: 32,
-  "qwen2.5": 7,
-  mistral: 7,
-  starcoder2: 7,
-  falcon3: 7,
-  "llama3.2": 3,
-  gemma2: 9,
-  "command-r": 7,
-  phi3: 4,
-  "dolphin-mixtral": 47,
-  "neural-chat": 7,
-  "orca-mini": 3,
-  nemotron: 4,
-  "llama-guard3": 8,
-  tinyllama: 1,
-  "mxbai-embed-large": 1,
-  "nomic-embed-text": 1,
-  "llama3.2-vision": 11,
-  llava: 7,
-  bakllava: 7,
-};
-
-// =========================================================================
-// Cloud model scoring (metadata-based, no hardcoded families)
-// =========================================================================
-
-function scoreFromCache(model, variant, entry) {
-  return scoreModelFromMeta(model, variant, entry);
-}
-
-function scoreFromHeuristics(model, variant) {
-  // Fallback heuristics when no metadata available - use generic tier detection
-  const parts = model.split("/");
-  const modelPart = parts[parts.length - 1] || "";
-  let score = 0;
-  const verMatch = modelPart.match(/(\d+)\.(\d+)/);
-  if (verMatch) score += parseInt(verMatch[1]) * 3 + parseInt(verMatch[2]);
-  const lower = modelPart.toLowerCase();
-  if (
-    lower.includes("opus") ||
-    lower.includes("pro") ||
-    lower.includes("ultra") ||
-    lower.includes("max") ||
-    lower.includes("large")
-  )
-    score += 14;
-  if (
-    lower.includes("sonnet") ||
-    lower.includes("flash") ||
-    lower.includes("plus") ||
-    lower.includes("advanced") ||
-    lower.includes("codex")
-  )
-    score += 8;
-  if (
-    lower.includes("haiku") ||
-    lower.includes("mini") ||
-    lower.includes("nano") ||
-    lower.includes("small") ||
-    lower.includes("lite")
-  )
-    score += 3;
-  if (lower.includes("reasoning") || lower.includes("think")) score += 10;
-  if (lower.includes("max") || lower.includes("large") || lower.includes("big"))
-    score += 5;
-  if (variant && VARIANT_BONUS[variant] !== undefined)
-    score += VARIANT_BONUS[variant];
-  const sizeMatch = modelPart.match(/(\d+)b/i);
-  if (sizeMatch) {
-    const size = parseInt(sizeMatch[1]);
-    if (size >= 70) score += 20;
-    else if (size >= 30) score += 15;
-    else if (size >= 13) score += 10;
-    else if (size >= 7) score += 5;
-  }
-  // No provider prestige - all providers treated equally
-  return score;
-}
-
-function scoreModel(model, variant, cacheEntry) {
-  return cacheEntry
-    ? scoreFromCache(model, variant, cacheEntry)
-    : scoreFromHeuristics(model, variant);
-}
-
-function panelModelOrder(config) {
-  return String(config?.omo?.panel_model_order || "opencode-first").trim();
-}
-
-function sortPanelModelRefs(refs, config) {
-  const order = panelModelOrder(config);
-  const scored = refs.map((ref, index) => ({
-    ref,
-    index,
-    provider: ref.split("/")[0],
-    score: scoreModel(ref, null, null),
-  }));
-
-  if (order === "score") {
-    scored.sort((a, b) => (b.score - a.score) || (a.index - b.index));
-  } else {
-    scored.sort((a, b) => {
-      const opencodeDiff = Number(b.provider === "opencode") - Number(a.provider === "opencode");
-      if (opencodeDiff !== 0) return opencodeDiff;
-      return (b.score - a.score) || (a.index - b.index);
-    });
-  }
-
-  return scored.map((s) => s.ref);
-}
-
-function panelModelFamilyLabel(modelName, meta = null) {
-  const model = String(modelName || "").toLowerCase();
-  
-  // If metadata available, use it for family detection
-  if (meta) {
-    const detected = detectFamilyFromMeta(meta, modelName);
-    if (detected.family) return detected.family;
-  }
-  
-  // Fallback: generic family detection from model name patterns
-  // These are generic tier/category indicators, not vendor-specific
-  if (model.includes("opus") || model.includes("pro-max") || model.includes("ultra")) return "flagship";
-  if (model.includes("sonnet") || model.includes("pro") || model.includes("plus")) return "advanced";
-  if (model.includes("haiku") || model.includes("mini") || model.includes("nano") || model.includes("lite") || model.includes("small")) return "compact";
-  if (model.includes("flash") || model.includes("speed") || model.includes("fast")) return "speed";
-  if (model.includes("reasoning") || model.includes("think") || model.includes("r1")) return "reasoning";
-  if (model.includes("codex") || model.includes("coder") || model.includes("code")) return "code";
-  if (model.includes("vision") || model.includes("vl") || model.includes("multimodal")) return "vision";
-  if (model.includes("embedding") || model.includes("embed")) return "embedding";
-  
-  // Size-based tiers
-  const sizeMatch = model.match(/(\d+)b/);
-  if (sizeMatch) {
-    const size = parseInt(sizeMatch[1]);
-    if (size >= 70) return "xxlarge";
-    if (size >= 30) return "xlarge";
-    if (size >= 13) return "large";
-    if (size >= 7) return "medium";
-    return "small";
-  }
-  
-  return "unknown";
-}
-
-function groupPanelModelRefs(models, cloudLookup = null) {
-  const groupOrder = [];
-  const byGroup = new Map();
-  for (const ref of models || []) {
-    const trimmed = String(ref || "").trim();
-    if (!trimmed) continue;
-    const slash = trimmed.indexOf("/");
-    const provider = slash === -1 ? "unknown" : trimmed.slice(0, slash);
-    const model = slash === -1 ? trimmed : trimmed.slice(slash + 1);
-    
-    // Get metadata for this model if cloudLookup available
-    let meta = null;
-    if (cloudLookup) {
-      const modelMap = cloudLookup.byId?.[provider];
-      if (modelMap) {
-        meta = modelMap.get(model) || modelMap.get(ref) || null;
-      }
-    }
-    
-    const family = provider === "cli" ? "agents" : panelModelFamilyLabel(model, meta);
-    const label = provider === "cli"
-      ? "CLI agents"
-      : provider === "opencode"
-        ? "opencode"
-        : family
-          ? `${provider}/${family}`
-          : provider;
-    if (!byGroup.has(label)) {
-      byGroup.set(label, []);
-      groupOrder.push(label);
-    }
-    byGroup.get(label).push({ ref: trimmed, model });
-  }
-  return groupOrder.map((label) => ({ label, models: byGroup.get(label) }));
-}
-
-function printNumberedPanelModelGroups(models, indent = "  ", cloudLookup = null) {
-  const groups = groupPanelModelRefs(models, cloudLookup);
-  const width = String(groups.length).length;
-  groups.forEach((group, index) => {
-    const prefix = `${indent}${String(index + 1).padStart(width, " ")}. ${group.label}: `;
-    group.models.forEach((entry, modelIdx) => {
-      if (modelIdx === 0) {
-        console.log(`${prefix}${entry.model}`);
-      } else {
-        console.log(`${" ".repeat(prefix.length)}${entry.model}`);
-      }
-    });
-  });
-  return groups.length;
-}
-
-function printSelectablePanelModelGroups(models, indent = "  ", cloudLookup = null) {
-  const groups = groupPanelModelRefs(models, cloudLookup);
-  const width = String(groups.length).length;
-  groups.forEach((group, index) => {
-    const prefix = `${indent}[${String(index + 1).padStart(width, " ")}] ${group.label}: `;
-    group.models.forEach((entry, modelIdx) => {
-      if (modelIdx === 0) {
-        console.log(`${prefix}${entry.model}`);
-      } else {
-        console.log(`${" ".repeat(prefix.length)}${entry.model}`);
-      }
-    });
-  });
-  return groups;
-}
-
-function configuredPanelModels(config) {
-  const models = config?.omo?.panel_models;
-  if (!Array.isArray(models)) return [];
-  return models
-    .map((model) => String(model || "").trim())
-    .filter(Boolean);
-}
-
-function panelModelsRequireOpencode(models) {
-  if (!Array.isArray(models) || models.length === 0) return true;
-  return models.some((model) => !String(model || "").startsWith("cli/"));
-}
-
-function selectedPanelRequiresOpencode(config, explicitModels) {
-  if (explicitModels.length > 0) return panelModelsRequireOpencode(explicitModels);
-  const configured = configuredPanelModels(config);
-  if (configured.length > 0) return panelModelsRequireOpencode(configured);
-  return true;
-}
-
-function opencodePanelModelsFromLookup(cloudLookup) {
-  const modelMap = cloudLookup?.byId?.opencode;
-  if (!modelMap) return [];
-  const ids =
-    modelMap instanceof Map
-      ? [...modelMap.keys()]
-      : Object.keys(modelMap);
-  return ids
-    .map((id) => String(id || "").trim())
-    .filter(Boolean)
-    .map((id) => (id.startsWith("opencode/") ? id : `opencode/${id}`));
-}
-
-function defaultPanelModels(config, cloudLookup = null, options = {}) {
-  const discovered = discoverFreeModels();
-  const refs =
-    discovered.length > 0
-      ? discovered
-      : opencodePanelModelsFromLookup(cloudLookup);
-  return preferDetectedCliPanelModels(refs, config, cloudLookup, MAX_PANEL_MODELS, options);
-}
-
-function plannedPanelModels(config, panelModels, cloudLookup = null, options = {}) {
-  if (panelModels && panelModels.length > 0) return panelModels;
-  const configured = configuredPanelModels(config);
-  return configured.length > 0 ? configured : defaultPanelModels(config, cloudLookup, options);
-}
-
-function createProgress(label) {
-  if (useClackPrompts && clack?.spinner) {
-    const spinner = clack.spinner();
-    spinner.start(label);
-    return {
-      update(message) {
-        spinner.message(`${label}: ${message}`);
-      },
-      done(message = "done") {
-        spinner.stop(`${label}: ${message}`);
-      },
-      skip(message) {
-        spinner.stop(`${label}: ${message}`);
-      },
-    };
-  }
-  const start = Date.now();
-  process.stdout.write(`  ⏳ ${label}...`);
-  return {
-    update(message) {
-      process.stdout.write(`\r  ⏳ ${label}: ${message}\x1b[K`);
-    },
-    done(message = "done") {
-      const elapsed = Math.max(0, Math.round((Date.now() - start) / 1000));
-      process.stdout.write(`\r  ✓ ${label}: ${message} (${elapsed}s)\x1b[K\n`);
-    },
-    skip(message) {
-      process.stdout.write(`\r  • ${label}: ${message}\x1b[K\n`);
-    },
-  };
-}
-
-function usableLocalVramGb(gpu) {
-  const gpuVram = Number(gpu?.vramGb);
-  if (!gpu?.hasGpu || !Number.isFinite(gpuVram)) return 0;
-  return Math.max(0, gpuVram - 1.5);
-}
-
-function buildFittingModels(allLocalModels, gpu) {
-  const usableVramGb = usableLocalVramGb(gpu);
-  return (allLocalModels || [])
-    .filter((model) => {
-      const modelVram = Number(model?.vram);
-      return Boolean(
-        model &&
-        normalizeLocalModelName(model.name) &&
-        Number.isFinite(modelVram) &&
-        modelVram >= 0 &&
-        modelVram <= usableVramGb,
-      );
-    })
-    .map((model) => ({ ...model, name: normalizeLocalModelName(model.name) }));
-}
-
-function buildFittingModelMap(allLocalModels, gpu) {
-  const byName = new Map();
-  for (const model of buildFittingModels(allLocalModels, gpu)) {
-    if (!byName.has(model.name)) byName.set(model.name, model);
-  }
-  return byName;
-}
-
-function resolveFittingLocalName(modelName, fittingByName) {
-  const name = normalizeLocalModelName(modelName);
-  return name && fittingByName.has(name) ? name : "";
-}
-
-function normalizeLocalRecommendation(rec, fittingByName, allowLocal) {
-  const normalized = normalizeRecommendation(rec);
-  if (!normalized) {
-    const provider = String(rec?.provider || "").trim();
-    const localName =
-      allowLocal && !provider
-        ? resolveFittingLocalName(rec?.model, fittingByName)
-        : "";
-    return localName
-      ? { ...rec, provider: LOCAL_PROVIDER, model: localName }
-      : null;
-  }
-  if (normalized.provider !== LOCAL_PROVIDER) return normalized;
-  if (!allowLocal) return null;
-  const localName = resolveFittingLocalName(normalized.model, fittingByName);
-  return localName
-    ? { ...normalized, provider: LOCAL_PROVIDER, model: localName }
-    : null;
-}
-
-function resultHasRejectedLocal(aiResult, fittingByName) {
-  const hasRejected = (rec, allowLocal) => {
-    const normalized = normalizeRecommendation(rec);
-    if (!normalized) {
-      const provider = String(rec?.provider || "").trim();
-      const rawModel = String(rec?.model || "").trim();
-      return Boolean(
-        rawModel &&
-        !provider &&
-        (!allowLocal || !resolveFittingLocalName(rawModel, fittingByName)),
-      );
-    }
-    if (normalized.provider !== LOCAL_PROVIDER) return false;
-    if (!allowLocal) return true;
-    return !resolveFittingLocalName(normalized.model, fittingByName);
-  };
-
-  for (const rec of Array.isArray(aiResult?.cloudRecommendations)
-    ? aiResult.cloudRecommendations
-    : []) {
-    const norm = normalizeAgentRec({ ...rec });
-    if (hasRejected(norm.model, true)) return true;
-    if ((norm.routing || []).some((r) => hasRejected(r, false))) return true;
-    if ((norm.fallback_models || []).some((r) => hasRejected(r, true)))
-      return true;
-  }
-  for (const decision of aiResult?.localModels?.decisions || []) {
-    if (!resolveFittingLocalName(decision?.name, fittingByName)) return true;
-  }
-  for (const placement of aiResult?.localModels?.placements || []) {
-    if (!resolveFittingLocalName(placement?.modelName, fittingByName))
-      return true;
-  }
-  return false;
-}
-
-/**
- * Normalize per-agent recommendation from either the old format (flat `recommendations` array)
- * or the new format (separate `model`, `routing`, `fallback_models` fields).
- * Always produces the new shape with model/routing/fallback_models.
- */
-function normalizeAgentRec(rec) {
-  if (!rec || typeof rec !== "object") return rec;
-  // Already has new shape — ensure arrays exist
-  if (rec.model && !rec.recommendations) return rec;
-  // Old shape: flatten recommendations[0] -> model, rest -> fallback_models
-  if (rec.recommendations && Array.isArray(rec.recommendations)) {
-    const r = rec.recommendations.filter((x) => x && x.provider && x.model);
-    if (r.length > 0) {
-      rec.model = r[0];
-      rec.routing = [];
-      rec.fallback_models = r.slice(1);
-    }
-    delete rec.recommendations;
-  }
-  // Ensure fields exist
-  if (!rec.model) rec.model = null;
-  if (!rec.routing) rec.routing = [];
-  if (!rec.fallback_models) rec.fallback_models = [];
-  return rec;
-}
-
-function normalizeRecommendation(rec) {
-  if (!rec || typeof rec !== "object") return null;
-  const provider = String(rec.provider || "").trim();
-  const rawModel = String(rec.model || "").trim();
-  if (!provider && !rawModel) return null;
-
-  const isLocal =
-    provider === "ollama" ||
-    provider === LOCAL_PROVIDER ||
-    rawModel.startsWith("ollama/") ||
-    rawModel.startsWith("local/");
-  let normalizedProvider = provider;
-  let normalizedModel = rawModel;
-
-  if (isLocal) {
-    const localName = normalizeLocalModelName(rawModel);
-    if (!localName) return null;
-    normalizedProvider = LOCAL_PROVIDER;
-    normalizedModel = localName;
-  } else if (provider && rawModel) {
-    const prefix = `${provider}/`;
-    normalizedModel = rawModel.startsWith(prefix)
-      ? rawModel.slice(prefix.length)
-      : rawModel;
-  }
-
-  if (!isLocal) {
-    if (!normalizedProvider) return null;
-    if (!normalizedModel) return null;
-  }
-
-  return { ...rec, provider: normalizedProvider, model: normalizedModel };
-}
-
-function modelRef(provider, modelName) {
-  return formatModelRef(provider, modelName);
-}
-
-function splitModelRef(ref) {
-  const trimmed = String(ref || "").trim();
-  const slash = trimmed.indexOf("/");
-  if (slash === -1) return { provider: "", model: trimmed };
-  return {
-    provider: trimmed.slice(0, slash),
-    model: trimmed.slice(slash + 1),
-  };
-}
+// Extracted functions now in lib/display-utils.js
 
 function isCliProvider(provider) {
   return provider === "cli";
@@ -968,7 +295,7 @@ function panelCandidateFamily(ref, cloudLookup) {
 function isPanelCandidateUsable(ref, cloudLookup) {
   const { provider, model } = splitModelRef(ref);
   if (!provider || !model) return false;
-  if (!isProviderAvailable(provider)) return false;
+  if (!isProviderAvailable(ctx, provider)) return false;
   return hasEnoughContextForPanel(ref, cloudLookup);
 }
 
@@ -1067,7 +394,7 @@ function filterPanelModelsForContext(refs, cloudLookup) {
 
 function isUsableRecommendation(rec, cloudLookup) {
   if (!rec || !rec.provider || !rec.model) return false;
-  if (!isProviderAvailable(rec.provider)) return false;
+  if (!isProviderAvailable(ctx, rec.provider)) return false;
   if (rec.provider === LOCAL_PROVIDER || isCliProvider(rec.provider)) return true;
   return hasEnoughContextForPanel(modelRef(rec.provider, rec.model), cloudLookup);
 }
@@ -1145,7 +472,7 @@ function rankAgyModel(line) {
 }
 
 function resolveAgyPanelModel() {
-  if (cachedAgyPanelModel !== undefined) return cachedAgyPanelModel;
+  if (ctx.cachedAgyPanelModel !== undefined) return ctx.cachedAgyPanelModel;
   if (process.env.OMO_AGY_PANEL_MODEL) return process.env.OMO_AGY_PANEL_MODEL;
   try {
     const raw = execFileSync("agy", ["models"], {
@@ -1159,11 +486,11 @@ function resolveAgyPanelModel() {
       .map((line) => normalizeCliModelLine(line))
       .filter(Boolean);
     models.sort((a, b) => rankAgyModel(a) - rankAgyModel(b) || a.localeCompare(b));
-    cachedAgyPanelModel = models[0] || "";
-    return cachedAgyPanelModel;
+    ctx.cachedAgyPanelModel = models[0] || "";
+    return ctx.cachedAgyPanelModel;
   } catch {
-    cachedAgyPanelModel = "";
-    return cachedAgyPanelModel;
+    ctx.cachedAgyPanelModel = "";
+    return ctx.cachedAgyPanelModel;
   }
 }
 
@@ -1171,291 +498,14 @@ function configuredCliPanelModel(config, id) {
   return String(config?.omo?.panel_cli_agents?.[id]?.model || "").trim();
 }
 
-function providerState(provider) {
-  if (!providerAvailability.has(provider)) {
-    providerAvailability.set(provider, {
-      creditExhausted: false,
-      rateLimitedUntil: 0,
-      reason: null,
-    });
-  }
-  return providerAvailability.get(provider);
-}
 
-function isProviderAvailable(provider, now = Date.now()) {
-  if (!provider || provider === LOCAL_PROVIDER || provider === "ollama" || isCliProvider(provider))
-    return true;
-  if (opencodeOnlyMode && provider !== "opencode")
-    return false;
-  if (
-    providerExclusionOptions.quotaRestricted &&
-    quotaExceededProviders.has(provider)
-  )
-    return false;
-  const state = providerAvailability.get(provider);
-  if (!state) return true;
-  if (providerExclusionOptions.quotaRestricted && state.creditExhausted)
-    return false;
-  if (
-    providerExclusionOptions.rateLimited &&
-    state.rateLimitedUntil &&
-    state.rateLimitedUntil > now
-  )
-    return false;
-  return true;
-}
-
-function shouldProbeProviderAvailability() {
-  return (
-    providerExclusionOptions.quotaRestricted ||
-    providerExclusionOptions.rateLimited
-  );
-}
-
-function markProviderCreditExhausted(provider, reason) {
-  if (!provider) return;
-  quotaExceededProviders.add(provider);
-  const state = providerState(provider);
-  state.creditExhausted = true;
-  state.reason = reason || "credit-exhausted";
-}
-
-function markProviderRateLimited(provider, retryAfterSeconds, reason) {
-  if (!provider) return;
-  const state = providerState(provider);
-  const delayMs = Math.max(1, Number(retryAfterSeconds) || 15) * 1000;
-  state.rateLimitedUntil = Math.max(
-    state.rateLimitedUntil || 0,
-    Date.now() + delayMs,
-  );
-  state.reason = reason || "rate-limited";
-}
-function probeModel(modelRef, signal = abortSignal) {
-  const slash = modelRef.indexOf("/");
-  const provider = slash === -1 ? "" : modelRef.slice(0, slash);
-  if (!provider || provider === LOCAL_PROVIDER || provider === "opencode" || isCliProvider(provider)) {
-    return Promise.resolve({ ok: true });
-  }
-
-  if (!isProviderAvailable(provider)) {
-    const state = providerAvailability.get(provider);
-    const reason = state?.creditExhausted
-      ? "quota-exceeded"
-      : state?.rateLimitedUntil && state.rateLimitedUntil > Date.now()
-        ? "rate-limited"
-        : "provider-unavailable";
-    return Promise.resolve({ ok: false, reason });
-  }
-
-  // Check if already aborted
-  if (signal?.aborted) {
-    return Promise.resolve({ ok: false, reason: "aborted", errorOutput: "Aborted by user" });
-  }
-
-  if (providerProbePromises.has(provider)) {
-    return providerProbePromises.get(provider);
-  }
-
-  const promise = new Promise((resolve) => {
-    const tempDir = os.tmpdir();
-    const child = spawnTracked(
-      "opencode",
-      [
-        "run",
-        "--pure",
-        "--agent",
-        "summary",
-        "--dir",
-        tempDir,
-        "--format",
-        "json",
-        "--model",
-        modelRef,
-        "--dangerously-skip-permissions",
-        "say 1",
-      ],
-      {
-        cwd: tempDir,
-        env: {
-          ...process.env,
-          PWD: tempDir,
-          INIT_CWD: tempDir,
-          TERM: "dumb",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    );
-
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        child.kill("SIGKILL");
-      } catch (e) {}
-    }, 30000);
-
-    // Handle abort signal
-    const abortHandler = () => {
-      clearTimeout(timer);
-      try {
-        child.kill("SIGKILL");
-      } catch (e) {}
-      resolve({ ok: false, reason: "aborted", errorOutput: "Aborted by user" });
-    };
-    if (signal) {
-      signal.addEventListener("abort", abortHandler, { once: true });
-    }
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener("abort", abortHandler);
-      resolve({ ok: false, reason: `spawn-error: ${err.message}` });
-    });
-
-    child.stdout.on("data", (d) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d) => {
-      stderr += d.toString();
-    });
-
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener("abort", abortHandler);
-      if (timedOut) {
-        markProviderRateLimited(provider, 30, "rate-limited");
-        resolve({ ok: false, reason: "timeout", errorOutput: "Request timed out after 30s" });
-        return;
-      }
-
-      const rawError = (stderr + "\n" + stdout).trim();
-      const lower = rawError.toLowerCase();
-
-      if (
-        lower.includes("429") ||
-        lower.includes("rate limit") ||
-        lower.includes("rate_limit") ||
-        lower.includes("too many requests") ||
-        lower.includes("too_many_requests")
-      ) {
-        const delay = parseRetryAfterSeconds(rawError) || 15;
-        markProviderRateLimited(provider, delay, "rate-limited");
-        resolve({ ok: false, reason: "rate-limited", errorOutput: rawError });
-        return;
-      }
-
-      if (
-        code === 402 ||
-        lower.includes("402") ||
-        lower.includes("payment required") ||
-        lower.includes("payment_required") ||
-        lower.includes("quota exceeded") ||
-        lower.includes("quota_exceeded") ||
-        lower.includes("billing limit") ||
-        lower.includes("billing_limit") ||
-        lower.includes("credit limit") ||
-        lower.includes("credit_limit") ||
-        lower.includes("insufficient funds") ||
-        lower.includes("insufficient_funds") ||
-        lower.includes("usage limit") ||
-        lower.includes("budget exceeded") ||
-        lower.includes("budget exhausted") ||
-        lower.includes("quota restricted") ||
-        lower.includes("credit expired") ||
-        lower.includes("credits expired") ||
-        lower.includes("unauthorized") ||
-        lower.includes("forbidden") ||
-        lower.includes("invalid api key") ||
-        lower.includes("invalid_api_key") ||
-        lower.includes("key invalid") ||
-        lower.includes("access denied") ||
-        lower.includes("exhausted") ||
-        lower.includes("restricted") ||
-        lower.includes("limit exceeded") ||
-        lower.includes("limit_exceeded")
-      ) {
-        markProviderCreditExhausted(provider, "quota-exceeded");
-        resolve({ ok: false, reason: "quota-exceeded", errorOutput: rawError });
-        return;
-      }
-
-      if (code !== 0 && code !== null) {
-        resolve({ ok: false, reason: `exit-code-${code}`, errorOutput: rawError });
-        return;
-      }
-
-      if (code === null) {
-        resolve({ ok: false, reason: "terminated-by-signal", errorOutput: "Process terminated by system signal" });
-        return;
-      }
-
-      resolve({ ok: true });
-    });
-  });
-
-  providerProbePromises.set(provider, promise);
-  return promise;
-}
-
-
-function allConfigEntries(config) {
-  return [
-    ...Object.entries(config.agents || {}).map(([name, section]) => ({
-      name,
-      type: "agent",
-      section,
-    })),
-    ...Object.entries(config.categories || {}).map(([name, section]) => ({
-      name,
-      type: "category",
-      section,
-    })),
-  ];
-}
-
-function uniqueByModelRef(recommendations) {
-  const seen = new Set();
-  const out = [];
-  for (const rec of recommendations) {
-    const normalized = normalizeRecommendation(rec);
-    if (!normalized) continue;
-    const key = modelRef(normalized.provider, normalized.model);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(normalized);
-  }
-  return out;
-}
-
-function finalizeFallbackModels(primary, fallbackModels) {
-  const primaryKey =
-    primary && primary.provider && primary.model
-      ? modelRef(primary.provider, primary.model)
-      : null;
-  return uniqueByModelRef(fallbackModels || []).filter(
-    (rec) => modelRef(rec.provider, rec.model) !== primaryKey,
-  );
-}
 
 // =========================================================================
 // Local model discovery (Ollama registry catalog)
 // =========================================================================
 
 function execCurl(url, accept) {
-  try {
-    const args = ["-s", "--max-time", "8"];
-    if (accept) args.push("-H", accept);
-    args.push(url);
-    return execFileSync("curl", args, {
-      encoding: "utf-8",
-      timeout: 15000,
-      env: { ...process.env, TERM: "dumb" },
-    });
-  } catch (_) {
-    return "";
-  }
+  return subprocess.fetchUrl(url, accept);
 }
 
 function registryModelSizeGb(name, tag) {
@@ -1628,179 +678,6 @@ function detectOllama() {
 // Tier chain construction + rebalance (algorithmic path)
 // =========================================================================
 
-function buildTierChains(modelCache, providerAliases) {
-  const chains = { reasoning: [], balanced: [], fast: [] };
-  for (const [provider, modelMap] of Object.entries(modelCache.byId || {})) {
-    if (!modelMap || modelMap.size === 0) continue;
-    if (provider === "local") continue;
-    const scored = [];
-    for (const [id, meta] of modelMap) {
-      scored.push({
-        model: `${provider}/${id}`,
-        score: scoreModel(`${provider}/${id}`, null, meta),
-        variant: null,
-      });
-    }
-    if (scored.length === 0) continue;
-    scored.sort((a, b) => b.score - a.score);
-    const n = scored.length;
-    chains.reasoning.push(scored[0]);
-    chains.balanced.push(scored[n <= 2 ? 0 : Math.floor((n - 1) / 2)]);
-    chains.fast.push(scored[n - 1]);
-  }
-  for (const tier of QUALITY_TIERS)
-    chains[tier].sort((a, b) => b.score - a.score);
-  return chains;
-}
-
-function fbToString(fb) {
-  return typeof fb === "string"
-    ? fb
-    : fb.model + (fb.variant ? ":" + fb.variant : "");
-}
-
-function applyTierChain(entry, tierChain) {
-  if (!tierChain || tierChain.length === 0) return { changed: false };
-  const newModel = tierChain[0].model;
-  const newVariant = tierChain[0].variant || null;
-  const newFallbacks = tierChain.slice(1).map((c) => {
-    const fb = { model: c.model };
-    if (c.variant) fb.variant = c.variant;
-    return fb;
-  });
-  const oldModelStr = entry.model + (entry.variant ? ":" + entry.variant : "");
-  const newModelStr = newModel + (newVariant ? ":" + newVariant : "");
-  const oldFbStr = (entry.fallback_models || []).map(fbToString).join(",");
-  const newFbStr = newFallbacks.map(fbToString).join(",");
-  if (oldModelStr === newModelStr && oldFbStr === newFbStr)
-    return { changed: false };
-  entry.model = newModel;
-  if (newVariant) entry.variant = newVariant;
-  else delete entry.variant;
-  if (newFallbacks.length > 0) entry.fallback_models = newFallbacks;
-  else delete entry.fallback_models;
-  return { changed: true };
-}
-
-function findModelInCache(providerKey, modelID, aliases, lookup) {
-  const realProvider = resolveProvider(providerKey, aliases);
-  const modelMap = lookup.byId[realProvider];
-  if (!modelMap) return null;
-  return (
-    modelMap.get(modelID) ||
-    modelMap.get(`${providerKey}/${modelID}`) ||
-    modelMap.get(`${realProvider}/${modelID}`) ||
-    null
-  );
-}
-
-function rebalanceEntry(entry, options) {
-  if (!entry || typeof entry !== "object") return { changed: false };
-  const {
-    tierChains,
-    withoutFree,
-    unavailableModels,
-    providerAliases,
-    modelCache,
-  } = options;
-  if (tierChains) {
-    const quality = entry.model_quality || "balanced";
-    const tier = tierChains[quality];
-    if (tier && tier.length > 0) {
-      let chain = tier;
-      if (withoutFree)
-        chain = tier.filter(
-          (c) => !FREE_PROVIDERS.includes(c.model.split("/")[0]),
-        );
-      if (chain.length === 0) return { changed: false };
-      const r = applyTierChain(entry, chain);
-      if (r.changed) return { changed: true, reason: `tier: ${quality}` };
-      return r;
-    }
-  }
-  const refs = [];
-  if (entry.model)
-    refs.push({ model: entry.model, variant: entry.variant || null });
-  if (entry.fallback_models) {
-    for (const fb of entry.fallback_models)
-      refs.push({ model: fb.model, variant: fb.variant || null });
-  }
-  if (refs.length === 0) return { changed: false };
-  if (unavailableModels && unavailableModels.size > 0) {
-    const filtered = refs.filter((r) => !unavailableModels.has(r.model));
-    if (filtered.length === 0) {
-      delete entry.model;
-      delete entry.variant;
-      delete entry.fallback_models;
-      return { changed: true, reason: "all models unavailable" };
-    }
-    refs.length = 0;
-    refs.push(...filtered);
-  }
-  const bestPerProvider = {};
-  for (const ref of refs) {
-    const providerKey = ref.model.split("/")[0];
-    const modelPart = ref.model.slice(ref.model.indexOf("/") + 1);
-    const realProvider = resolveProvider(providerKey, aliases);
-    const cacheEntry = findModelInCache(
-      providerKey,
-      modelPart,
-      aliases,
-      modelCache,
-    );
-    const rank = scoreModel(ref.model, ref.variant, cacheEntry);
-    if (
-      !bestPerProvider[realProvider] ||
-      rank > bestPerProvider[realProvider].rank
-    ) {
-      bestPerProvider[realProvider] = { ...ref, provider: providerKey, rank };
-    }
-  }
-  let candidates = Object.values(bestPerProvider);
-  if (withoutFree)
-    candidates = candidates.filter((c) => !FREE_PROVIDERS.includes(c.provider));
-  if (candidates.length === 0) return { changed: false };
-  candidates.sort((a, b) => b.rank - a.rank);
-  const newModel = candidates[0].model;
-  const newVariant = candidates[0].variant;
-  const newFallbacks = candidates.slice(1).map((c) => {
-    const fb = { model: c.model };
-    if (c.variant) fb.variant = c.variant;
-    return fb;
-  });
-  const oldModelStr = entry.model + (entry.variant ? ":" + entry.variant : "");
-  const newModelStr = newModel + (newVariant ? ":" + newVariant : "");
-  const oldFbStr = (entry.fallback_models || []).map(fbToString).join(",");
-  const newFbStr = newFallbacks.map(fbToString).join(",");
-  if (oldModelStr === newModelStr && oldFbStr === newFbStr)
-    return { changed: false };
-  entry.model = newModel;
-  if (newVariant) entry.variant = newVariant;
-  else delete entry.variant;
-  if (newFallbacks.length > 0) entry.fallback_models = newFallbacks;
-  else delete entry.fallback_models;
-  return { changed: true };
-}
-
-function rebalanceConfig(config, options) {
-  const changes = [];
-  for (const [name, agent] of Object.entries(config.agents || {})) {
-    if (agent.model || agent.fallback_models) {
-      const r = rebalanceEntry(agent, options);
-      if (r.changed)
-        changes.push(`agents.${name}${r.reason ? ` — ${r.reason}` : ""}`);
-    }
-  }
-  for (const [name, cat] of Object.entries(config.categories || {})) {
-    if (cat.model || cat.fallback_models) {
-      const r = rebalanceEntry(cat, options);
-      if (r.changed)
-        changes.push(`categories.${name}${r.reason ? ` — ${r.reason}` : ""}`);
-    }
-  }
-  return changes;
-}
-
 // =========================================================================
 // Display functions
 // =========================================================================
@@ -1824,7 +701,7 @@ function showCloudRecommendations(aiResult, config) {
     if (prevModel) {
       const parts = prevModel.split("/");
       const prevProv = parts[0];
-      if (isProviderAvailable(prevProv)) {
+      if (isProviderAvailable(ctx, prevProv)) {
         prevModelAvailable = true;
       }
     }
@@ -1955,9 +832,10 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
 function discoverCliModels(config = {}, options = {}) {
   const { excludeCodex, excludeAgy } = options;
   const agents = [];
-  const codexPanelModel = configuredCliPanelModel(config, "codex");
-  const agyPanelModel =
-    configuredCliPanelModel(config, "agy") || resolveAgyPanelModel();
+
+  function isExcludedCliId(id) {
+    return (id === "codex" && excludeCodex) || (id === "agy" && excludeAgy);
+  }
 
   function parseCliJson(raw) {
     const jsonMatch = String(raw || "").match(/\{[\s\S]*\}/);
@@ -2071,8 +949,10 @@ function discoverCliModels(config = {}, options = {}) {
     };
   }
 
-  let cliAdapters = [
-    {
+  const cliAdapters = [];
+  if (!excludeCodex) {
+    const codexPanelModel = configuredCliPanelModel(config, "codex");
+    cliAdapters.push({
       binary: "codex",
       ref: "cli/codex",
       panelModel: codexPanelModel,
@@ -2087,8 +967,12 @@ function discoverCliModels(config = {}, options = {}) {
           "never",
           prompt,
         ],
-    },
-    {
+    });
+  }
+  if (!excludeAgy) {
+    const agyPanelModel =
+      configuredCliPanelModel(config, "agy") || resolveAgyPanelModel();
+    cliAdapters.push({
       binary: "agy",
       ref: "cli/agy",
       panelModel: agyPanelModel,
@@ -2102,14 +986,7 @@ function discoverCliModels(config = {}, options = {}) {
           "--print",
           prompt,
         ],
-    },
-  ];
-
-  if (excludeCodex) {
-    cliAdapters = cliAdapters.filter((a) => a.binary !== "codex");
-  }
-  if (excludeAgy) {
-    cliAdapters = cliAdapters.filter((a) => a.binary !== "agy");
+    });
   }
 
   const configuredAgents = config?.omo?.panel_cli_agents;
@@ -2118,6 +995,7 @@ function discoverCliModels(config = {}, options = {}) {
       const id = String(entry?.id || name || "").trim();
       const command = entry?.command;
       if (!id || !command) continue;
+      if (isExcludedCliId(id.replace(/^cli\//, ""))) continue;
       cliAdapters.push({
         binary: inferCliBinary(entry, id),
         ref: `cli/${id.replace(/^cli\//, "")}`,
@@ -2195,54 +1073,6 @@ const PANEL_FIRST_BYTE_TIMEOUT_SECONDS = Math.max(
   ) || PANEL_MODEL_TIMEOUT_SECONDS,
 );
 
-function killChild(child) {
-  if (child.exitCode === null && child.signalCode === null)
-    child.kill("SIGTERM");
-  setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null)
-      child.kill("SIGKILL");
-  }, 5000);
-}
-
-function compactErrorText(text) {
-  return (text || "")
-    .replace(/\x1b\[[0-9;]*m/g, "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(-3)
-    .join(" ");
-}
-
-function parseRetryAfterSeconds(text) {
-  const raw = String(text || "");
-  const numericPatterns = [
-    /retry-after["']?\s*[:=]\s*["']?(\d+)/i,
-    /retry_after["']?\s*[:=]\s*["']?(\d+)/i,
-    /retryAfter["']?\s*[:=]\s*["']?(\d+)/i,
-    /x-ratelimit-reset["']?\s*[:=]\s*["']?(\d+)/i,
-    /x-rate-limit-reset["']?\s*[:=]\s*["']?(\d+)/i,
-  ];
-  for (const pattern of numericPatterns) {
-    const match = raw.match(pattern);
-    if (!match) continue;
-    const value = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(value)) continue;
-    if (pattern.source.includes("reset") && value > 1000000000) {
-      return Math.max(1, value - Math.floor(Date.now() / 1000));
-    }
-    return Math.max(1, value);
-  }
-
-  const dateMatch = raw.match(/retry-after["']?\s*[:=]\s*["']?([^"'\r\n]+)/i);
-  if (dateMatch) {
-    const ts = Date.parse(dateMatch[1].trim());
-    if (Number.isFinite(ts))
-      return Math.max(1, Math.ceil((ts - Date.now()) / 1000));
-  }
-  return null;
-}
-
 function extractOpencodeText(stdout) {
   const texts = [];
   for (const line of stdout.trim().split("\n")) {
@@ -2256,163 +1086,70 @@ function extractOpencodeText(stdout) {
   return texts.join("") || null;
 }
 
-function callPanelModelAsync(model, prompt, signal, statusRef) {
-  return new Promise((resolve) => {
-    const tempDir = os.tmpdir();
-    const child = spawnTracked(
-      "opencode",
-      [
-        "run",
-        "--pure",
-        "--agent",
-        "summary",
-        "--dir",
-        tempDir,
-        "--format",
-        "json",
-        "--model",
-        model,
-        "--dangerously-skip-permissions",
-        prompt,
-      ],
-      {
-        cwd: tempDir,
-        env: {
-          ...process.env,
-          PWD: tempDir,
-          INIT_CWD: tempDir,
-          TERM: "dumb",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-
-    let stdout = "";
-    let stderr = "";
-    let timersCleaned = false;
-    const cleanupTimers = () => {
-      if (timersCleaned) return;
-      timersCleaned = true;
-      clearTimeout(firstByteTimer);
-      clearTimeout(totalTimer);
-    };
-
-    const firstByteTimer = setTimeout(() => {
-      if (statusRef) statusRef.failReason = "first-byte-timeout";
-      killChild(child);
-    }, PANEL_FIRST_BYTE_TIMEOUT_SECONDS * 1000);
-
-    const totalTimer = setTimeout(() => {
-      if (statusRef) statusRef.failReason = "total-timeout";
-      killChild(child);
-    }, PANEL_MODEL_TIMEOUT_SECONDS * 1000);
-
-    let firstByteReceived = false;
-    child.stdout.on("data", (data) => {
-      if (!firstByteReceived) {
-        firstByteReceived = true;
-        clearTimeout(firstByteTimer);
-      }
-      stdout += data.toString();
-      if (statusRef) {
-        statusRef.phase = "receiving";
-        statusRef.bytes = stdout.length;
-      }
-    });
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-      if (statusRef) statusRef.stderr = compactErrorText(stderr);
-    });
-
-    child.on("error", (err) => {
-      cleanupTimers();
-      if (statusRef) {
-        statusRef.failReason = "spawn-error";
-        statusRef.stderr = err.message;
-      }
-      resolve(null);
-    });
-
-    child.on("close", (code) => {
-      cleanupTimers();
-      if (signal && signal.aborted) {
-        if (statusRef) statusRef.failReason = "aborted";
-        return resolve(null);
-      }
-
-      // Detect quota / billing errors from stdout/stderr or exit code
-      if (statusRef) {
-        const rawError = stderr + "\n" + stdout;
-        const lower = rawError.toLowerCase();
-        if (
-          code === 402 ||
-          lower.includes("402") ||
-          lower.includes("payment required") ||
-          lower.includes("payment_required") ||
-          lower.includes("quota exceeded") ||
-          lower.includes("quota_exceeded") ||
-          lower.includes("billing limit") ||
-          lower.includes("billing_limit") ||
-          lower.includes("credit limit") ||
-          lower.includes("credit_limit") ||
-          lower.includes("insufficient funds") ||
-          lower.includes("insufficient_funds") ||
-          lower.includes("usage limit") ||
-          lower.includes("budget exceeded")
-        ) {
-          statusRef.quotaExceeded = true;
-          statusRef.creditExhausted = true;
-          if (!statusRef.failReason) statusRef.failReason = "quota-exceeded";
-          statusRef.stderr = compactErrorText(stderr || stdout);
-        }
-      }
-
-      // Detect rate limiting from stdout/stderr text
-      if (statusRef) {
-        const rawError = stderr + "\n" + stdout;
-        const lower = rawError.toLowerCase();
-        if (
-          lower.includes("429") ||
-          lower.includes("rate limit") ||
-          lower.includes("too many requests")
-        ) {
-          statusRef.rateLimited = true;
-          statusRef.retryAfter =
-            parseRetryAfterSeconds(rawError) || statusRef.retryAfter || 15;
-          if (!statusRef.failReason) statusRef.failReason = "rate-limited";
-          statusRef.stderr = compactErrorText(stderr || stdout);
-        }
-      }
-
-      if (!stdout) {
-        if (statusRef) {
-          if (!statusRef.failReason)
-            statusRef.failReason = code ? "process-error" : "empty-response";
-          if (!statusRef.stderr) statusRef.stderr = compactErrorText(stderr);
-        }
-        return resolve(null);
-      }
-      const text = extractOpencodeText(stdout);
-      if (!text && statusRef) {
-        statusRef.failReason = "empty-text";
-        statusRef.stderr = compactErrorText(stderr);
-      }
-      resolve(text);
-    });
-
-    if (signal) {
-      signal.addEventListener(
-        "abort",
-        () => {
-          cleanupTimers();
-          if (statusRef) statusRef.failReason = "aborted";
-          killChild(child);
-        },
-        { once: true },
-      );
-    }
+async function callPanelModelAsync(model, prompt, signal, statusRef) {
+  const tempDir = os.tmpdir();
+  const stdout = await subprocess.execAsync("opencode", [
+    "run", "--pure", "--agent", "summary",
+    "--dir", tempDir, "--format", "json",
+    "--model", model,
+    "--dangerously-skip-permissions",
+    prompt,
+  ], {
+    cwd: tempDir,
+    env: { PWD: tempDir, INIT_CWD: tempDir },
+    firstByteTimeoutMs: PANEL_FIRST_BYTE_TIMEOUT_SECONDS * 1000,
+    totalTimeoutMs: PANEL_MODEL_TIMEOUT_SECONDS * 1000,
+    signal,
+    statusRef,
   });
+
+  if (!stdout) return null;
+
+  // Detect quota / billing errors from stderr captured in statusRef
+  if (statusRef && statusRef.stderr) {
+    const rawError = (statusRef.stderr || "") + "\n" + stdout;
+    const lower = rawError.toLowerCase();
+    if (
+      lower.includes("402") ||
+      lower.includes("payment required") ||
+      lower.includes("payment_required") ||
+      lower.includes("quota exceeded") ||
+      lower.includes("quota_exceeded") ||
+      lower.includes("billing limit") ||
+      lower.includes("billing_limit") ||
+      lower.includes("credit limit") ||
+      lower.includes("credit_limit") ||
+      lower.includes("insufficient funds") ||
+      lower.includes("insufficient_funds") ||
+      lower.includes("usage limit") ||
+      lower.includes("budget exceeded")
+    ) {
+      statusRef.quotaExceeded = true;
+      statusRef.creditExhausted = true;
+      if (!statusRef.failReason) statusRef.failReason = "quota-exceeded";
+      statusRef.stderr = compactErrorText(statusRef.stderr || stdout);
+    }
+
+    // Detect rate limiting
+    const rateLower = rawError.toLowerCase();
+    if (
+      rateLower.includes("429") ||
+      rateLower.includes("rate limit") ||
+      rateLower.includes("too many requests")
+    ) {
+      statusRef.rateLimited = true;
+      statusRef.retryAfter =
+        parseRetryAfterSeconds(rawError) || statusRef.retryAfter || 15;
+      if (!statusRef.failReason) statusRef.failReason = "rate-limited";
+      statusRef.stderr = compactErrorText(statusRef.stderr || stdout);
+    }
+  }
+
+  const text = extractOpencodeText(stdout);
+  if (!text && statusRef) {
+    statusRef.failReason = "empty-text";
+  }
+  return text;
 }
 
 function findCliAgent(cliAgents, ref) {
@@ -2440,7 +1177,7 @@ async function cleanAiResponse(raw) {
     raw,
   ].join("\n");
   try {
-    const result = await callPanelModelAsync(model, prompt, abortSignal, {});
+    const result = await callPanelModelAsync(model, prompt, ctx.signal, {});
     return result || null;
   } catch (_) {
     return null;
@@ -2478,9 +1215,9 @@ async function callModelForAgent(
   }
 
   const provider = model.split("/")[0];
-  if (!isProviderAvailable(provider)) {
+  if (!isProviderAvailable(ctx, provider)) {
     if (statusRef) {
-      const state = providerAvailability.get(provider);
+      const state = ctx.providerAvailability.get(provider);
       statusRef.failReason = state?.creditExhausted
         ? "quota-exceeded"
         : "rate-limited";
@@ -2518,7 +1255,7 @@ async function callModelForAgent(
     }
 
     if (statusRef?.quotaExceeded) {
-      markProviderCreditExhausted(provider, statusRef.failReason);
+      markProviderCreditExhausted(ctx, provider, statusRef.failReason);
       return null;
     }
 
@@ -2527,7 +1264,7 @@ async function callModelForAgent(
 
     // Rate-limited — use Retry-After if the server specified one, else a fixed interval
     const delay = statusRef.retryAfter || 15;
-    markProviderRateLimited(provider, delay, statusRef.failReason);
+    markProviderRateLimited(ctx, provider, delay, statusRef.failReason);
 
     if (statusRef) {
       statusRef.failReason = `rate-limited retry ${attempt}/${maxRetries} (${delay}s)`;
@@ -2578,7 +1315,7 @@ function buildAgentPrompt(entry, cloudLookup, allLocalModels, gpu, ollama) {
 
   // 1. Get all available providers (not credit exhausted, not rate limited)
   const availableProviders = Object.keys(cloudLookup.byId || {}).filter(
-    (provider) => provider !== "local" && isProviderAvailable(provider)
+    (provider) => provider !== "local" && isProviderAvailable(ctx, provider)
   );
 
   // 2. Get the top 10 models for each available provider, plus any free models
@@ -2850,7 +1587,7 @@ async function runPanelAndSelect(
     try {
       probeResults = await Promise.all(models.map((m) => {
         const cliAgent = findCliAgent(cliAgents, m);
-        return cliAgent ? cliAgent.probe() : probeModel(m);
+        return cliAgent ? cliAgent.probe() : probeModel(ctx, m);
       }));
       availableModels = models.filter((m, i) => probeResults[i].ok);
       progress.done(`${availableModels.length} of ${models.length} model(s) available`);
@@ -2861,7 +1598,7 @@ async function runPanelAndSelect(
 
     if (availableModels.length === 0) {
       console.log("\n\u26A0 No panel models are available (all are quota-restricted or rate-limited). Limiting analysis and recommendations to opencode AI models exclusively.");
-      opencodeOnlyMode = true;
+      ctx.opencodeOnlyMode = true;
       
       console.log("\nFailed model details / errors:");
       for (let i = 0; i < models.length; i++) {
@@ -2880,7 +1617,7 @@ async function runPanelAndSelect(
       try {
         const probeResults2 = await Promise.all(freeModels.map((m) => {
           const cliAgent = findCliAgent(cliAgents, m);
-          return cliAgent ? cliAgent.probe() : probeModel(m);
+          return cliAgent ? cliAgent.probe() : probeModel(ctx, m);
         }));
         availableModels = freeModels.filter((m, i) => probeResults2[i].ok);
         progress2.done(`${availableModels.length} of ${freeModels.length} model(s) available`);
@@ -2907,7 +1644,7 @@ async function runPanelAndSelect(
       const availableCloudModels = [];
       for (const [provider, modelMap] of Object.entries(cloudLookup.byId || {})) {
         if (provider === LOCAL_PROVIDER || provider === "opencode") continue;
-        if (!isProviderAvailable(provider)) continue;
+        if (!isProviderAvailable(ctx, provider)) continue;
         for (const [modelId, meta] of modelMap.entries()) {
           const ref = `${provider}/${modelId}`;
           if (!hasEnoughContextForPanel(ref, cloudLookup)) continue;
@@ -3019,7 +1756,7 @@ async function runPanelAndSelect(
           gpu,
           ollama,
         );
-        const rec = await callModelForAgent(m, prompt, abortSignal, statusRef, cliAgents, entry.name);
+        const rec = await callModelForAgent(m, prompt, ctx.signal, statusRef, cliAgents, entry.name);
         if (rec) modelSuccessCounts.set(m, (modelSuccessCounts.get(m) || 0) + 1);
         st.results.push(rec ? { model: m, recommendation: rec } : null);
         tasksDone++;
@@ -3050,126 +1787,18 @@ async function runPanelAndSelect(
   }
   process.stdout.write("\n"); // new line after the status bar
 
-  // ── Tally votes for all agents ──
-  const cloudRecommendations = [];
-  for (let ai = 0; ai < agents.length; ai++) {
-    const entry = agents[ai];
-    const st = state[ai];
-
-    const validResults = st.results.filter(
-      (r) =>
-        r &&
-        r.recommendation &&
-        r.recommendation.model &&
-        r.recommendation.model.provider,
-    );
-    if (validResults.length === 0) continue;
-
-    const modelVotes = {};
-    const modelReasons = {};
-    const routingVotes = {};
-    const fbVotes = {};
-    for (const { recommendation: rec } of validResults) {
-      if (
-        rec.model &&
-        rec.model.provider &&
-        rec.model.model &&
-        isProviderAvailable(rec.model.provider)
-      ) {
-        const key = `${rec.model.provider}/${rec.model.model}`;
-        modelVotes[key] = (modelVotes[key] || 0) + 1;
-        if (rec.model.reason) modelReasons[key] = rec.model.reason;
-      }
-      for (const r of rec.routing || []) {
-        if (r.provider && r.model && isProviderAvailable(r.provider)) {
-          const key = `${r.provider}/${r.model}`;
-          routingVotes[key] = (routingVotes[key] || 0) + 1;
-        }
-      }
-      for (const r of rec.fallback_models || []) {
-        if (r.provider && r.model && isProviderAvailable(r.provider)) {
-          const key = `${r.provider}/${r.model}`;
-          fbVotes[key] = (fbVotes[key] || 0) + 1;
-        }
-      }
-    }
-
-    const total = validResults.length;
-    const majority = total / 2;
-    const sortedModels = Object.entries(modelVotes).sort((a, b) => b[1] - a[1]);
-
-    let consensusRec = null;
-    if (sortedModels.length > 0) {
-      const [winnerKey, winnerCount] = sortedModels[0];
-      const [provider, ...modelParts] = winnerKey.split("/");
-      consensusRec = {
-        name: entry.name,
-        type: entry.type,
-        profile: entry.section.description || entry.section.model_quality || "",
-        model: {
-          provider,
-          model: modelParts.join("/"),
-          reason: `${winnerCount}/${total} models${modelReasons[winnerKey] ? " \u2014 " + modelReasons[winnerKey] : ""}`,
-        },
-        routing: [],
-        fallback_models: [],
-      };
-
-      // Routing: majority support
-      for (const [key, count] of Object.entries(routingVotes).sort(
-        (a, b) => b[1] - a[1],
-      )) {
-        if (count > majority) {
-          const [rp, ...rm] = key.split("/");
-          consensusRec.routing.push({
-            provider: rp,
-            model: rm.join("/"),
-            reason: `${count}/${total} models`,
-          });
-        }
-      }
-
-      // Fallback: majority support
-      for (const [key, count] of Object.entries(fbVotes).sort(
-        (a, b) => b[1] - a[1],
-      )) {
-        if (count > majority) {
-          const [fp, ...fm] = key.split("/");
-          consensusRec.fallback_models.push({
-            provider: fp,
-            model: fm.join("/"),
-            reason: `${count}/${total} models`,
-          });
-        }
-      }
-
-      // Note if no majority
-      if (winnerCount <= majority) {
-        consensusRec.model.reason = `Plurality (${winnerCount}/${total} models) \u2014 no majority`;
-      }
-    }
-
-    st.consensus = consensusRec;
-    if (consensusRec) cloudRecommendations.push(consensusRec);
-  }
+  // ── Tally votes for all agents (delegated to consensus module) ──
+  const consensusResult = computeConsensus(state, agents, models, ctx, isProviderAvailable);
 
   // Build final result (completeAiRecommendations will fill localModels)
   const result = {
-    recommender: `panel(${models.map((m) => m.split("/").pop()).join("+")})`,
-    analysis: `Per-agent consensus across ${models.length} panel models for ${agents.length} agent(s)`,
-    cloudRecommendations,
+    recommender: consensusResult.recommender,
+    analysis: consensusResult.analysis,
+    cloudRecommendations: consensusResult.cloudRecommendations,
     localModels: { decisions: [], placements: [] },
   };
 
   return { selected: result, panel: { state, models } };
-}
-
-function installedLocalNameSet(ollama) {
-  return new Set(
-    (ollama.models || [])
-      .map((m) => normalizeLocalModelName(m.name))
-      .filter(Boolean),
-  );
 }
 
 function bestCloudRecommendationForProvider(provider, modelMap, cloudLookup) {
@@ -3472,395 +2101,11 @@ function completeAiRecommendations(
 // Apply functions
 // =========================================================================
 
-async function applyCloudChanges(aiResult, config, autoYes) {
-  if (
-    !aiResult.cloudRecommendations ||
-    aiResult.cloudRecommendations.length === 0
-  )
-    return 0;
-  let count = 0;
-  for (const rec of aiResult.cloudRecommendations) {
-    const section = config.agents?.[rec.name] || config.categories?.[rec.name];
-    if (!section) continue;
-    if (rec.model) {
-      section.model = `${rec.model.provider}/${rec.model.model}`;
-      if (rec.routing && rec.routing.length > 0) {
-        section.routing = rec.routing.map((r) => `${r.provider}/${r.model}`);
-      } else if (section.routing) {
-        delete section.routing;
-      }
-      if (rec.fallback_models && rec.fallback_models.length > 0) {
-        section.fallback_models = rec.fallback_models.map(
-          (r) => `${r.provider}/${r.model}`,
-        );
-      } else if (section.fallback_models) {
-        delete section.fallback_models;
-      }
-      count++;
-    }
-  }
-  return count;
-}
-
-async function applyLocalPlacements(
-  placements,
-  config,
-  autoYes,
-  allLocalModels,
-) {
-  if (!placements || placements.length === 0) return 0;
-  const byAgent = {};
-  for (const p of placements) {
-    const section =
-      config.agents?.[p.agentName] || config.categories?.[p.agentName];
-    if (!section) {
-      console.log(
-        `  \u26A0 Agent/category "${p.agentName}" not found in config \u2014 skipping`,
-      );
-      continue;
-    }
-    if (!byAgent[p.agentName]) byAgent[p.agentName] = [];
-    byAgent[p.agentName].push({
-      section,
-      modelName: normalizeLocalModelName(p.modelName),
-      role: p.role,
-    });
-  }
-  if (Object.keys(byAgent).length === 0) return 0;
-
-  let changed = 0;
-  for (const [agentName, entries] of Object.entries(byAgent)) {
-    const section = entries[0].section;
-
-    // Only keep the highest-scored local model per agent
-    let bestEntry = entries[0];
-    let bestScore = -1;
-    for (const e of entries) {
-      const m = allLocalModels.find((x) => x.name === e.modelName);
-      const s = m ? m.score : 0;
-      if (s > bestScore) {
-        bestScore = s;
-        bestEntry = e;
-      }
-    }
-
-    const localRef = modelRef(LOCAL_PROVIDER, bestEntry.modelName);
-    const existingFbs = Array.isArray(section.fallback_models)
-      ? section.fallback_models
-          .map((fb) => (typeof fb === "string" ? fb : fb.model))
-          .filter(Boolean)
-      : [];
-    const cleaned = existingFbs.filter(
-      (fb) => !fb.startsWith("local/") && !fb.startsWith("ollama/"),
-    );
-
-    if (bestEntry.role === "primary") {
-      const previousPrimary =
-        section.model &&
-        !section.model.startsWith("local/") &&
-        !section.model.startsWith("ollama/")
-          ? section.model
-          : null;
-      section.model = localRef;
-      const fallbacks = previousPrimary
-        ? [previousPrimary, ...cleaned]
-        : cleaned;
-      section.fallback_models = [...new Set(fallbacks)];
-      if (section.fallback_models.length === 0) delete section.fallback_models;
-      changed++;
-      console.log(`  \u2713 ${agentName}: local primary set to ${localRef}`);
-    } else if (
-      section.model &&
-      !section.model.startsWith("local/") &&
-      !section.model.startsWith("ollama/")
-    ) {
-      // Has cloud primary — add only the best local model as a fallback
-      section.fallback_models = [...new Set([...cleaned, localRef])];
-      changed++;
-      console.log(`  \u2713 ${agentName}: local fallback set to ${localRef}`);
-    } else {
-      // No existing cloud model, or already local — set the best model as primary
-      section.model = `local/${normalizeLocalModelName(bestEntry.modelName)}`;
-      if (section.fallback_models) delete section.fallback_models;
-      if (section.routing) delete section.routing;
-      changed++;
-      console.log(
-        `  \u2713 ${agentName}: placed local/${normalizeLocalModelName(bestEntry.modelName)}`,
-      );
-    }
-  }
-  return changed;
-}
-
-/**
- * Pull an Ollama model, with curl-based fallback when the `ollama` CLI fails.
- * 1. Attempts `ollama pull <name>` (shows native progress bars).
- * 2. On failure, retries via POST http://localhost:11434/api/pull (streams JSON progress).
- * Returns true if the model was successfully pulled, false otherwise.
- */
-function pullModel(modelName) {
-  // Primary: ollama CLI
-  try {
-    execFileSync("ollama", ["pull", modelName], {
-      stdio: "inherit",
-      timeout: 600000,
-    });
-    return true;
-  } catch (e) {
-    console.error(`  \u2716 Failed to pull ${modelName}: ${e.message}`);
-  }
-
-  // Fallback: curl-based Ollama API pull
-  try {
-    console.log(
-      `  \u2192 Retrying via curl API at http://localhost:11434/api/pull ...`,
-    );
-    const body = JSON.stringify({ name: modelName });
-    execFileSync(
-      "curl",
-      [
-        "-N",
-        "-X",
-        "POST",
-        "http://localhost:11434/api/pull",
-        "-d",
-        body,
-        "--max-time",
-        "600",
-      ],
-      { stdio: "inherit", timeout: 610000 },
-    );
-    console.log(`  \u2713 ${modelName} pulled via curl`);
-    return true;
-  } catch (e2) {
-    console.error(`  \u2716 Also failed via curl: ${e2.message}`);
-    return false;
-  }
-}
-
-async function installAndUninstallModels(decisions, ollama, autoYes, noInstall = false, noUninstall = false) {
-  if (!decisions) return new Set();
-  const normalizedDecisions = decisions
-    .map((d) => ({ ...d, name: normalizeLocalModelName(d.name) }))
-    .filter((d) => d.name);
-  const installedNames = installedLocalNameSet(ollama);
-  const toInstall = normalizedDecisions.filter((d) => d.action === "install");
-  const toRemove = normalizedDecisions.filter((d) => d.action === "uninstall");
-  const toKeep = normalizedDecisions.filter((d) => d.action === "keep");
-
-  // Return set of model names confirmed present after install phase
-  const confirmed = new Set(
-    toKeep.filter((d) => installedNames.has(d.name)).map((d) => d.name),
-  );
-
-  for (const d of toInstall) {
-    const alreadyInstalled = installedNames.has(d.name);
-    if (alreadyInstalled) {
-      console.log(`  \u2713 ${d.name} already installed`);
-      confirmed.add(d.name);
-      continue;
-    }
-    if (noInstall) {
-      console.log(`  \u2192 skipped installation of ${d.name} via --no-install`);
-      continue;
-    }
-    if (autoYes) {
-      console.log(`  \u2192 Pulling ${d.name}...`);
-      if (pullModel(d.name)) {
-        console.log(`  \u2713 ${d.name} pulled`);
-        confirmed.add(d.name);
-      } else {
-        console.log(
-          `  \u2192 Config will NOT include placement for ${d.name}\n`,
-        );
-      }
-    } else {
-      const ok = await confirm(`  Install ${d.name}? [y/N] `);
-      if (ok) {
-        console.log(`  \u2192 Pulling ${d.name}...`);
-        if (pullModel(d.name)) {
-          console.log(`  \u2713 ${d.name} pulled`);
-          confirmed.add(d.name);
-        } else {
-          console.log(
-            `  \u2192 Config will NOT include placement for ${d.name}\n`,
-          );
-        }
-      } else {
-        console.log(`  \u2192 Skipped`);
-      }
-    }
-  }
-
-  for (const d of toRemove) {
-    const isInstalled = installedNames.has(d.name);
-    if (!isInstalled) {
-      continue;
-    }
-    if (noUninstall) {
-      console.log(`  \u2192 skipped uninstall of ${d.name} via --no-uninstall`);
-      continue;
-    }
-    if (autoYes) {
-      try {
-        execFileSync("ollama", ["rm", d.name], {
-          stdio: "inherit",
-          timeout: 60000,
-        });
-        console.log(`  \u2713 ${d.name} removed`);
-      } catch (e) {
-        console.error(`  \u2716 Failed to remove ${d.name}: ${e.message}`);
-      }
-    } else {
-      const ok = await confirm(`  Uninstall ${d.name}? [y/N] `);
-      if (ok) {
-        try {
-          execFileSync("ollama", ["rm", d.name], {
-            stdio: "inherit",
-            timeout: 60000,
-          });
-          console.log(`  \u2713 ${d.name} removed`);
-        } catch (e) {
-          console.error(`  \u2716 Failed to remove ${d.name}: ${e.message}`);
-        }
-      } else {
-        console.log(`  \u2192 Skipped`);
-      }
-    }
-  }
-
-  return confirmed;
-}
-
-async function offerUninstallOrphans(decisions, ollama, autoYes, noRemoveOrphans = false) {
-  // Models the AI evaluated (any decision = considered)
-  const considered = new Set((decisions || []).map((d) => d.name));
-  // Installed models the AI never mentioned
-  const orphans = ollama.models.filter((m) => !considered.has(m.name));
-
-  if (orphans.length === 0) return;
-  if (noRemoveOrphans) {
-    console.log(`  \u2192 skipped orphan removal via --no-remove-orphans`);
-    return;
-  }
-
-  console.log(
-    `\n\u2500\u2500 Unnecessary models (${orphans.length}) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-  );
-  console.log(`  Installed but AI never recommended keeping:`);
-  for (const m of orphans) {
-    console.log(`  \u2022 ${m.name}  (${m.size})`);
-  }
-  console.log("");
-
-  if (autoYes) {
-    for (const m of orphans) {
-      try {
-        execFileSync("ollama", ["rm", m.name], {
-          stdio: "inherit",
-          timeout: 60000,
-        });
-        console.log(`  \u2713 ${m.name} removed`);
-      } catch (e) {
-        console.error(`  \u2716 Failed to remove ${m.name}: ${e.message}`);
-      }
-    }
-    return;
-  }
-
-  const ok = await confirm(
-    `Remove these ${orphans.length} model(s) to free disk space? (y/N) `,
-  );
-  if (!ok) {
-    console.log("  \u2192 Skipped\n");
-    return;
-  }
-  for (const m of orphans) {
-    try {
-      execFileSync("ollama", ["rm", m.name], {
-        stdio: "inherit",
-        timeout: 60000,
-      });
-      console.log(`  \u2713 ${m.name} removed`);
-    } catch (e) {
-      console.error(`  \u2716 Failed to remove ${m.name}: ${e.message}`);
-    }
-  }
-}
-
-// =========================================================================
-// Rebalance display (algorithmic)
-// =========================================================================
-
-function showRebalance(config, richLookup, aliases, localModelNames) {
-  const tierChains = buildTierChains(richLookup, aliases);
-  console.log(`\n\uD83D\uDD2E Algorithmic tier chains for ${CONFIG_PATH}\n`);
-  if (localModelNames.length > 0) {
-    console.log(
-      `\u2500\u2500 Local \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-    );
-    console.log(`  Ollama models: ${localModelNames.join(", ")}\n`);
-  }
-  for (const tier of QUALITY_TIERS) {
-    const chain = tierChains[tier];
-    if (chain && chain.length > 0) {
-      console.log(
-        `\u2500\u2500 ${tier} chain \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-      );
-      chain.forEach((c, i) => {
-        const prefix = i === 0 ? "\u2192 primary" : `  fallback ${i}`;
-        console.log(`  ${prefix}: ${c.model} (${Math.round(c.score)})`);
-      });
-      console.log();
-    }
-  }
-  console.log(
-    `\u2500\u2500 Agents / Categories \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-  );
-  const allEntries = [];
-  for (const [name, agent] of Object.entries(config.agents || {})) {
-    if (agent.model) allEntries.push({ name, type: "agent", entry: agent });
-  }
-  for (const [name, cat] of Object.entries(config.categories || {})) {
-    if (cat.model) allEntries.push({ name, type: "category", entry: cat });
-  }
-  if (allEntries.length === 0) {
-    console.log("  No model references found in config.");
-  } else {
-    console.log(`  ${allEntries.length} section(s) with model references:\n`);
-    for (const { name, type, entry } of allEntries) {
-      const quality = entry.model_quality || "balanced";
-      const current = entry.model || "(none)";
-      const chain = tierChains[quality];
-      const recommended = chain && chain.length > 0 ? chain[0].model : "(none)";
-      const changed =
-        current !== recommended ? " \u26A1 would change" : " \u2713";
-      console.log(`  ${name} (${type})`);
-      console.log(`    quality:    ${quality}`);
-      console.log(`    current:    ${current}`);
-      console.log(`    recommend:  ${recommended}${changed}`);
-      if (chain && chain.length > 1) {
-        console.log(
-          `    fallbacks:  ${chain
-            .slice(1)
-            .map((c) => c.model)
-            .join(", ")}`,
-        );
-      }
-      console.log();
-    }
-  }
-}
-
 // =========================================================================
 // Main
 // =========================================================================
 
 async function main() {
-  // Create a fresh AbortController for this run
-  abortController = new AbortController();
-  abortSignal = abortController.signal;
-  
   installSignalHandlers();
   const parsedArgs = mri(process.argv.slice(2), {
     boolean: [
@@ -3934,7 +2179,7 @@ async function main() {
     return;
   }
   const doRebalance = parsedArgs.rebalance;
-  debugMode = parsedArgs.debug;
+  ctx.debugMode = parsedArgs.debug;
   const realTty =
     Boolean(process.stdout.isTTY) &&
     process.env.TERM !== "dumb" &&
@@ -3956,14 +2201,15 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  providerExclusionOptions.rateLimited = parsedArgs["exclude-rate-limited"];
-  providerExclusionOptions.quotaRestricted = parsedArgs["exclude-quota-restricted"];
+  ctx.providerExclusionOptions.rateLimited = parsedArgs["exclude-rate-limited"];
+  ctx.providerExclusionOptions.quotaRestricted = parsedArgs["exclude-quota-restricted"];
   const explicitModels = [parsedArgs.model]
     .flat()
     .filter((model) => typeof model === "string" && model.trim())
     .map((model) => model.trim());
 
   await configureTerminalUi(realTty);
+  setProgressClackState(ctx.useClackPrompts, ctx.clack);
   if (dryRunFallback) {
     console.log(
       "  • Non-interactive environment detected; previewing changes only. Pass --yes to apply.",
@@ -4045,15 +2291,15 @@ async function main() {
     }
     const topPaid = candidates;
 
-    if (shouldProbeProviderAvailability()) {
+    if (shouldProbeProviderAvailability(ctx)) {
       paidProbesEnabled = true;
       // Create an array of promises that can be aborted
       const probePromises = topPaid.map(async (modelRef) => {
         // Check for abort before each probe
-        if (abortSignal.aborted) {
+        if (ctx.signal.aborted) {
           return { modelRef, ok: false, reason: "aborted", errorOutput: "Aborted by user" };
         }
-        const res = await probeModel(modelRef, abortSignal);
+        const res = await probeModel(ctx, modelRef, ctx.signal);
         return { modelRef, ok: res.ok, reason: res.reason, errorOutput: res.errorOutput };
       });
       paidProbesPromise = Promise.all(probePromises).then((results) => {
@@ -4061,7 +2307,7 @@ async function main() {
         return sortedPaid.filter((m) => {
           const provider = m.split("/")[0];
           return (
-            isProviderAvailable(provider) &&
+            isProviderAvailable(ctx, provider) &&
             hasEnoughContextForPanel(m, initialCloudLookup)
           );
         });
@@ -4161,28 +2407,28 @@ async function main() {
         return;
       }
     }
-    if (backupConfig(CONFIG_PATH, BACKUP_PATH)) {
-      console.log(`  \u2713 Backup saved to ${BACKUP_PATH}`);
+    if (backupConfig(getConfigPath(), getBackupPath())) {
+      console.log(`  \u2713 Backup saved to ${getBackupPath()}`);
     }
-    console.log(`  Backup: ${BACKUP_PATH}`);
+    console.log(`  Backup: ${getBackupPath()}`);
     try {
       writeConfigWithValidation({
         config,
-        configPath: CONFIG_PATH,
-        backupPath: BACKUP_PATH,
+        configPath: getConfigPath(),
+        backupPath: getBackupPath(),
         validatorPath: path.join(__dirname, "omo-validate-config"),
         validateStdio: "inherit",
       });
       console.log(`\u2705 ${rebalanceChanges.length} section(s) restructured.\n`);
     } catch (validationErr) {
       console.error(`\n\u2716 Validation FAILED.`);
-      if (fs.existsSync(BACKUP_PATH)) {
+      if (fs.existsSync(getBackupPath())) {
         console.log(
-          `  \u2713 Reverted to previous config (backup at ${BACKUP_PATH})`,
+          `  \u2713 Reverted to previous config (backup at ${getBackupPath()})`,
         );
       } else {
         console.log(
-          `  \u26A0 No backup found at ${BACKUP_PATH} \u2014 config on disk may be invalid.`,
+          `  \u26A0 No backup found at ${getBackupPath()} \u2014 config on disk may be invalid.`,
         );
       }
       throw validationErr;
@@ -4511,7 +2757,7 @@ async function main() {
         );
       } else {
         panelModels = defaultPanelModels(config, cloudLookup, cliOptions);
-        opencodeOnlyMode = true;
+        ctx.opencodeOnlyMode = true;
       }
     }
   }
@@ -4599,15 +2845,15 @@ async function main() {
     }
   } catch (e) {
     console.error(`\n\u2716 AI recommendation failed: ${e.message}`);
-    if (fs.existsSync(CONFIG_PATH)) {
+    if (fs.existsSync(getConfigPath())) {
       console.log("  Config unchanged.\n");
     } else {
       console.log(
         "\n  Writing a minimal valid config skeleton. Re-run when models are available.\n",
       );
       const rewritten = JSON.stringify(config, null, 2) + "\n";
-      fs.writeFileSync(CONFIG_PATH, rewritten, "utf-8");
-      console.log(`  \u2713 Config written to ${CONFIG_PATH}`);
+      fs.writeFileSync(getConfigPath(), rewritten, "utf-8");
+      console.log(`  \u2713 Config written to ${getConfigPath()}`);
       console.log(`  No backup (new config — no previous file to preserve)\n`);
     }
     return;
@@ -4658,8 +2904,8 @@ async function main() {
   }
 
   // Backup
-  if (backupConfig(CONFIG_PATH, BACKUP_PATH)) {
-    console.log(`  \u2713 Backup saved to ${BACKUP_PATH}`);
+  if (backupConfig(getConfigPath(), getBackupPath())) {
+    console.log(`  \u2713 Backup saved to ${getBackupPath()}`);
   }
 
   // Local models must be installed/confirmed before config refs are written.
@@ -4726,7 +2972,7 @@ async function main() {
     }
   }
 
-  console.log(`  Backup: ${BACKUP_PATH}`);
+  console.log(`  Backup: ${getBackupPath()}`);
   const totalChanges = totalCloud + totalLocal;
 
   // Validate — roll back on failure
@@ -4734,8 +2980,8 @@ async function main() {
   try {
     writeConfigWithValidation({
       config,
-      configPath: CONFIG_PATH,
-      backupPath: BACKUP_PATH,
+      configPath: getConfigPath(),
+      backupPath: getBackupPath(),
       validatorPath: path.join(__dirname, "omo-validate-config"),
       validateStdio: ["inherit", "inherit", "pipe"],
     });
@@ -4749,13 +2995,13 @@ async function main() {
       }
     }
     // Restore from the backup taken before applying
-    if (fs.existsSync(BACKUP_PATH)) {
+    if (fs.existsSync(getBackupPath())) {
       console.log(
-        `  \u2713 Reverted to previous config (backup at ${BACKUP_PATH})`,
+        `  \u2713 Reverted to previous config (backup at ${getBackupPath()})`,
       );
     } else {
       console.log(
-        `  \u26A0 No backup found at ${BACKUP_PATH} \u2014 config on disk may be invalid.`,
+        `  \u26A0 No backup found at ${getBackupPath()} \u2014 config on disk may be invalid.`,
       );
     }
     console.log(
@@ -4780,7 +3026,7 @@ async function main() {
 main()
   .catch((e) => {
     console.error(`\n${pc.red("\u2716 " + (e.message || String(e)))}`);
-    if (debugMode && e.stack) {
+    if (ctx.debugMode && e.stack) {
       console.error(e.stack);
     }
     // Show execSync stderr if available (validation failures, subprocess errors, etc.)

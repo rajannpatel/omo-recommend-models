@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import {
-  CONFIG_PATH,
+  getConfigPath,
   CACHE_DIR,
   jsoncParse,
   loadProviderModels,
@@ -47,7 +47,7 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const options = { configPath: CONFIG_PATH, fix: false, help: false };
+  const options = { configPath: getConfigPath(), fix: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {

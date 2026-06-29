@@ -1424,13 +1424,23 @@ test("exclude CLI agent flags and print transparency logs", async (t) => {
     "--dry-run",
     "--cloud-only",
     "--exclude-codex",
-    "--exclude-agy"
+    "--exclude-agy",
   ], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /AI CLI agent cli\/codex excluded via --exclude-codex/);
   assert.match(result.stdout, /AI CLI agent cli\/agy excluded via --exclude-agy/);
+  assert.doesNotMatch(result.stdout, /CLI agents: codex/);
+  assert.doesNotMatch(result.stdout, /CLI agents: agy/);
+  assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
+  assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/agy:/);
+
+  const cliLog = fs.existsSync(harness.env.OMO_FAKE_CLI_LOG)
+    ? fs.readFileSync(harness.env.OMO_FAKE_CLI_LOG, "utf8")
+    : "";
+  assert.doesNotMatch(cliLog, /"tool":"codex"/);
+  assert.doesNotMatch(cliLog, /"tool":"agy"/);
 });
 
 test("exclude free models flags and print transparency logs", async (t) => {
@@ -1495,4 +1505,3 @@ test("no-install flag prints skipped message", async (t) => {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /skipped installation of local-model-b:latest via --no-install/);
 });
-
