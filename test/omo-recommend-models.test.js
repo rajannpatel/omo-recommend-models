@@ -218,6 +218,8 @@ process.stdout.write(${output});
 function writeFakeAgy(binDir, options = {}) {
   const fakePath = path.join(binDir, "agy");
   const output = options.output ?? `JSON.stringify(payload) + "\\n"`;
+  const probeDelayMs = Number(options.probeDelayMs ?? options.delayMs ?? 0);
+  const callDelayMs = Number(options.callDelayMs ?? options.delayMs ?? 0);
   const modelsOutput = JSON.stringify(options.models || [
     "Atlas Standard (Medium)",
     "Atlas Heavy (High)",
@@ -232,6 +234,11 @@ if (logPath) fs.appendFileSync(logPath, JSON.stringify({ tool: "agy", args }) + 
 if (args[0] === "models") {
   process.stdout.write(${modelsOutput}.join("\\n") + "\\n");
   process.exit(0);
+}
+const prompt = args[args.length - 1] || "";
+const delayMs = prompt.includes('"name":"probe"') ? ${probeDelayMs} : ${callDelayMs};
+if (delayMs > 0) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
 const payload = {
   name: "sisyphus",
@@ -401,6 +408,42 @@ function runValidator(env, args = [], timeoutMs = 5000) {
       clearTimeout(timer);
       resolve({ code, signal, stdout, stderr, timedOut });
     });
+  });
+}
+
+function observeCliBeforeExit(env, input = "", args = ["--dry-run", "--cloud-only"], observeAfterMs = 300, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: env.HOME,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let observation = null;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(observeTimer);
+      clearTimeout(timeoutTimer);
+      resolve(value);
+    };
+    const observeTimer = setTimeout(() => {
+      observation = { stdout, stderr, exited: false };
+      child.kill("SIGTERM");
+    }, observeAfterMs);
+    const timeoutTimer = setTimeout(() => {
+      observation = { stdout, stderr, exited: false, timedOut: true };
+      child.kill("SIGTERM");
+    }, timeoutMs);
+    child.stdout.on("data", (data) => { stdout += data.toString(); });
+    child.stderr.on("data", (data) => { stderr += data.toString(); });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      finish(observation || { code, signal, stdout, stderr, exited: true });
+    });
+    child.stdin.end(input);
   });
 }
 
@@ -1357,6 +1400,34 @@ test("configured Codex CLI panel usage includes detected agy and is disclosed ex
   assert.match(result.stdout, /Configured CLI panel agents: cli\/codex \(Codex CLI\), cli\/agy/);
   assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
   assert.match(result.stdout, /AI Analysis \(via panel\(codex\+agy\)\)/);
+});
+
+test("slow CLI panel agents report the active evaluation before completion", async (t) => {
+  const harness = createHarness(t, {
+    agy: true,
+    agyOptions: { callDelayMs: 1000 },
+    config: defaultConfig({
+      root: {
+        omo: {
+          panel_models: ["cli/agy"],
+        },
+      },
+    }),
+  });
+
+  const observed = await observeCliBeforeExit(
+    harness.env,
+    "",
+    ["--dry-run", "--cloud-only", "--exclude-codex", "--interactive"],
+    500,
+  );
+
+  assert.equal(observed.exited, false, "fake agy delay should keep the CLI running long enough to observe progress");
+  assert.match(
+    observed.stdout,
+    /evaluating sisyphus with cli\/agy/,
+    `expected realtime progress before the slow agy call completed\nstdout:\n${observed.stdout}\nstderr:\n${observed.stderr}`,
+  );
 });
 
 test("invalid CLI probe output is excluded from the AI Panel before voting", async (t) => {

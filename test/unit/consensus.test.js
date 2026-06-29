@@ -103,6 +103,30 @@ test("computeConsensus returns empty cloudRecommendations for empty state", () =
   assert.ok(result.analysis);
 });
 
+test("computeConsensus skips null panel results without crashing", () => {
+  const agents = [
+    { name: "sisyphus", type: "agent", section: { model_quality: "high" } },
+  ];
+  const state = [
+    {
+      results: [
+        null,
+        {
+          recommendation: {
+            model: { provider: "opencode", model: "big-pickle" },
+          },
+        },
+      ],
+    },
+  ];
+  const models = ["opencode/failed-free", "opencode/big-pickle"];
+
+  const result = computeConsensus(state, agents, models, mockCtx, allAvailable);
+  assert.equal(result.cloudRecommendations.length, 1);
+  assert.equal(result.cloudRecommendations[0].model.provider, "opencode");
+  assert.equal(result.cloudRecommendations[0].model.model, "big-pickle");
+});
+
 test("computeConsensus with multiple voters picks majority winner", () => {
   const agents = [
     { name: "sisyphus", type: "agent", section: { model_quality: "high" } },

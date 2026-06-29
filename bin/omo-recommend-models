@@ -69,7 +69,8 @@ function defaultPanelModels(config, cloudLookup = null, options = {}) {
     ...options,
     _discoverFreeModels: discoverFreeModels,
     _preferDetectedCliPanelModels: (refs, cfg, cl, max, opts) => {
-      const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists);
+      const discoverFn = (cfg2, opts2) =>
+        discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
       return preferDetectedCliPanelModelsImpl(refs, cfg, cl, max, opts, discoverFn, ctx);
     },
   });
@@ -425,7 +426,7 @@ async function main() {
   // Inject local models into cloud lookup for scoring context
   
   // Count available CLI agents (installed AI CLIs)
-  const cliAgents = discoverCliModelsImpl(config, cliOptions, ctx, commandExists);
+  const cliAgents = discoverCliModelsImpl(config, cliOptions, ctx, commandExists, subprocess);
   const installedCliCount = cliAgents.length;
   
   console.log(
@@ -468,7 +469,7 @@ async function main() {
       confirm,
       ctx,
       defaultPanelModels,
-      discoverCliModels: (cfg, opts) => discoverCliModelsImpl(cfg, opts, ctx, commandExists),
+      discoverCliModels: (cfg, opts) => discoverCliModelsImpl(cfg, opts, ctx, commandExists, subprocess),
       discoverFreeModels,
       dryRun,
       ensureProbesAwaited,
@@ -477,7 +478,7 @@ async function main() {
       getAvailablePaid: () => paidProbesPromise,
       gpuCtx,
       includeDetectedCliPanelModels: (models, cfg, opts) => {
-        const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists);
+        const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
         return includeDetectedCliPanelModelsImpl(models, cfg, opts, discoverFn);
       },
       initialExcludeFreeFromConfig: excludeFreeFromConfig,
@@ -501,7 +502,7 @@ async function main() {
           defaultPanelModels,
         ),
       selectPreferredPanelModels: (models, cfg, cl, max, opts) => {
-        const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists);
+        const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
         return selectPreferredPanelModelsImpl(models, cfg, cl, max, opts, discoverFn, ctx);
       },
       cliOptions,
