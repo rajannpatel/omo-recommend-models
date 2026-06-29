@@ -32,6 +32,7 @@ import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
 import { preparePaidProviderModels } from "../lib/recommend/paid-provider-prep.js";
 import { discoverLocalEnvironment } from "../lib/recommend/local-environment.js";
 import { completeAiRecommendations } from "../lib/recommend/recommendation-finalizer.js";
+import { createRuleBasedRecommendations } from "../lib/recommend/rules-assignment.js";
 import { runPanelAndSelect } from "../lib/recommend/panel-core.js";
 import {
   selectedPanelRequiresOpencode,
@@ -301,6 +302,7 @@ async function main() {
   const autoYes = !dryRun && explicitYes;
   const cloudOnlyFlag = parsedArgs["exclude-local"];
   const localOnlyFlag = parsedArgs["exclude-cloud"];
+  const useAiPanel = parsedArgs["ai-panel"];
 
   if (cloudOnlyFlag && localOnlyFlag) {
     console.error("Error: --cloud-only and --local-only are mutually exclusive");
@@ -324,6 +326,7 @@ async function main() {
   const config = loadConfig();
 
   if (
+    useAiPanel &&
     selectedPanelRequiresOpencode(config, explicitModels) &&
     !commandExists("opencode")
   ) {
@@ -338,15 +341,22 @@ async function main() {
     return;
   }
 
-  const needPrompt = explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
+  const needPrompt = useAiPanel && explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
 
-  const paidProviderPrep = preparePaidProviderModels({
-    config,
-    ctx,
-    localOnlyFlag,
-    hasEnoughContextForPanel,
-    filterUsablePanelModels: (refs, cloudLookup) => filterUsablePanelModelsImpl(refs, cloudLookup, ctx),
-  });
+  const paidProviderPrep = useAiPanel
+    ? preparePaidProviderModels({
+        config,
+        ctx,
+        localOnlyFlag,
+        hasEnoughContextForPanel,
+        filterUsablePanelModels: (refs, cloudLookup) => filterUsablePanelModelsImpl(refs, cloudLookup, ctx),
+      })
+    : {
+        initialCache: null,
+        initialCloudLookup: { byId: {}, sets: {} },
+        paidProbesPromise: Promise.resolve([]),
+        ensureProbesAwaited: async () => {},
+      };
   const {
     initialCache,
     initialCloudLookup,
@@ -409,7 +419,6 @@ async function main() {
     noCache: !parsedArgs.cache,
   };
 
-  // Inject local models into cloud lookup for scoring context
   if (!cloudOnlyFlag && localModelNames.length > 0) {
     if (!cloudLookup.sets.local) cloudLookup.sets.local = new Set();
     localModelNames.forEach((m) => cloudLookup.sets.local.add(m));
@@ -423,20 +432,19 @@ async function main() {
     ([provider, modelMap]) =>
       provider !== LOCAL_PROVIDER && modelMap && modelMap.size > 0,
   ).length;
-  // Inject local models into cloud lookup for scoring context
   
-  // Count available CLI agents (installed AI CLIs)
-  const cliAgents = discoverCliModelsImpl(config, cliOptions, ctx, commandExists, subprocess);
-  const installedCliCount = cliAgents.length;
-  
-  console.log(
-    `  \u2713 AI Panel: ${cloudProviderCount} opencloud provider(s), ${installedCliCount} installed AI CLI(s)\n`,
-  );
+  if (useAiPanel) {
+    const cliAgents = discoverCliModelsImpl(config, cliOptions, ctx, commandExists, subprocess);
+    const installedCliCount = cliAgents.length;
+    console.log(
+      `  \u2713 AI Panel: ${cloudProviderCount} opencloud provider(s), ${installedCliCount} installed AI CLI(s)\n`,
+    );
+  } else {
+    console.log(
+      `  \u2713 Rule matcher: ${cloudProviderCount} provider(s) loaded from OpenCode model cache\n`,
+    );
+  }
 
-  // Determine which panel models to use
-  // Priority: 1) --model CLI flags, 2) interactive picker, 3) omo.panel_models,
-  // 4) default top 5 ordered by `omo.panel_model_order` ("opencode-first"
-  // unless set to "score").
   let aiResult;
   const localCtx = cloudOnlyFlag ? [] : allLocalModels;
   const gpuCtx = cloudOnlyFlag
@@ -452,63 +460,71 @@ async function main() {
     : ollama;
 
   try {
-    const panelSelection = await selectPanelRecommendation({
-      autoYes,
-      cloudLookup,
-      cloudOnlyFlag,
-      completeAiRecommendations: (result) =>
-        completeAiRecommendations(
-          result,
-          config,
-          cloudLookup,
-          localCtx,
-          gpuCtx,
-          ollamaCtx,
-        ),
-      config,
-      confirm,
-      ctx,
-      defaultPanelModels,
-      discoverCliModels: (cfg, opts) => discoverCliModelsImpl(cfg, opts, ctx, commandExists, subprocess),
-      discoverFreeModels,
-      dryRun,
-      ensureProbesAwaited,
-      explicitModels,
-      filterPanelModelsForContext,
-      getAvailablePaid: () => paidProbesPromise,
-      gpuCtx,
-      includeDetectedCliPanelModels: (models, cfg, opts) => {
-        const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
-        return includeDetectedCliPanelModelsImpl(models, cfg, opts, discoverFn);
-      },
-      initialExcludeFreeFromConfig: excludeFreeFromConfig,
-      localCtx,
-      localOnlyFlag,
-      parsedArgs,
-      printCliPanelDisclosure,
-      promptUser,
-      runPanelAndSelect: (panelModels) =>
-        runPanelAndSelect(
-          config,
-          cloudLookup,
-          localCtx,
-          gpuCtx,
-          ollamaCtx,
-          cloudOnlyFlag,
-          panelModels,
-          cliOptions,
-          ctx,
-          subprocess,
-          defaultPanelModels,
-        ),
-      selectPreferredPanelModels: (models, cfg, cl, max, opts) => {
-        const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
-        return selectPreferredPanelModelsImpl(models, cfg, cl, max, opts, discoverFn, ctx);
-      },
-      cliOptions,
-    });
-    aiResult = panelSelection.aiResult;
-    excludeFreeFromConfig = panelSelection.excludeFreeFromConfig;
+    if (!useAiPanel) {
+      aiResult = createRuleBasedRecommendations({
+        config,
+        cloudLookup,
+        excludeModels: parsedArgs["exclude-model"],
+      });
+    } else {
+      const panelSelection = await selectPanelRecommendation({
+        autoYes,
+        cloudLookup,
+        cloudOnlyFlag,
+        completeAiRecommendations: (result) =>
+          completeAiRecommendations(
+            result,
+            config,
+            cloudLookup,
+            localCtx,
+            gpuCtx,
+            ollamaCtx,
+          ),
+        config,
+        confirm,
+        ctx,
+        defaultPanelModels,
+        discoverCliModels: (cfg, opts) => discoverCliModelsImpl(cfg, opts, ctx, commandExists, subprocess),
+        discoverFreeModels,
+        dryRun,
+        ensureProbesAwaited,
+        explicitModels,
+        filterPanelModelsForContext,
+        getAvailablePaid: () => paidProbesPromise,
+        gpuCtx,
+        includeDetectedCliPanelModels: (models, cfg, opts) => {
+          const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
+          return includeDetectedCliPanelModelsImpl(models, cfg, opts, discoverFn);
+        },
+        initialExcludeFreeFromConfig: excludeFreeFromConfig,
+        localCtx,
+        localOnlyFlag,
+        parsedArgs,
+        printCliPanelDisclosure,
+        promptUser,
+        runPanelAndSelect: (panelModels) =>
+          runPanelAndSelect(
+            config,
+            cloudLookup,
+            localCtx,
+            gpuCtx,
+            ollamaCtx,
+            cloudOnlyFlag,
+            panelModels,
+            cliOptions,
+            ctx,
+            subprocess,
+            defaultPanelModels,
+          ),
+        selectPreferredPanelModels: (models, cfg, cl, max, opts) => {
+          const discoverFn = (cfg2, opts2) => discoverCliModelsImpl(cfg2, opts2, ctx, commandExists, subprocess);
+          return selectPreferredPanelModelsImpl(models, cfg, cl, max, opts, discoverFn, ctx);
+        },
+        cliOptions,
+      });
+      aiResult = panelSelection.aiResult;
+      excludeFreeFromConfig = panelSelection.excludeFreeFromConfig;
+    }
   } catch (e) {
     console.error(`\n\u2716 AI recommendation failed: ${e.message}`);
     if (fs.existsSync(getConfigPath())) {

@@ -321,7 +321,10 @@ function createHarness(t, options = {}) {
 }
 
 function runCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
-  const finalArgs = [...args];
+  const finalArgs = args.filter((arg) => arg !== "--rules-default");
+  if (!args.includes("--rules-default") && !finalArgs.includes("--ai-panel")) {
+    finalArgs.push("--ai-panel");
+  }
   if (!finalArgs.includes("-y") && !finalArgs.includes("--interactive")) {
     finalArgs.push("--interactive");
   }
@@ -521,6 +524,49 @@ test("default panel falls back to opencode models from provider cache", async (t
   assert.match(result.stdout, /This run would query:/);
   assert.match(result.stdout, /opencode: big-pickle/);
   assert.doesNotMatch(result.stdout + result.stderr, /No free models available/);
+});
+
+test("default recommender uses upstream rule chain without AI Panel", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig(),
+    providerCache: {
+      models: {
+        "opencode-go": [{ id: "kimi-k2.6", family: "kimi", context_length: 200000 }],
+        opencode: [{ id: "big-pickle", family: "glm", context_length: 200000 }],
+      },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["--rules-default", "--dry-run", "--cloud-only"]);
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Rule matcher: 2 provider\(s\)/);
+  assert.match(result.stdout, /AI Analysis \(via rules\(model-core\)\)/);
+  assert.match(result.stdout, /model: opencode-go\/kimi-k2\.6/);
+  assert.doesNotMatch(result.stdout, /This run would query:/);
+});
+
+test("default recommender strips manually excluded quota models", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig(),
+    providerCache: {
+      models: {
+        "opencode-go": [{ id: "kimi-k2.6", family: "kimi", context_length: 200000 }],
+        opencode: [{ id: "big-pickle", family: "glm", context_length: 200000 }],
+      },
+    },
+  });
+
+  const result = await runCli(
+    harness.env,
+    "",
+    ["--rules-default", "--dry-run", "--cloud-only", "--exclude-model", "opencode-go/kimi-k2.6"],
+  );
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Excluded by override: opencode-go\/kimi-k2\.6/);
+  assert.match(result.stdout, /model: opencode\/big-pickle/);
+  assert.doesNotMatch(result.stdout, /model: opencode-go\/kimi-k2\.6/);
 });
 
 test("normalizes Ollama recommendations to local model refs with startup progress", async (t) => {
@@ -1418,7 +1464,7 @@ test("slow CLI panel agents report the active evaluation before completion", asy
   const observed = await observeCliBeforeExit(
     harness.env,
     "",
-    ["--dry-run", "--cloud-only", "--exclude-codex", "--interactive"],
+    ["--dry-run", "--cloud-only", "--exclude-codex", "--interactive", "--ai-panel"],
     500,
   );
 

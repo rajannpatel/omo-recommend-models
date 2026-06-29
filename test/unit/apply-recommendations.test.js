@@ -76,3 +76,37 @@ test("applyCloudAssignments clears stale routing and fallbacks", () => {
   assert.equal("routing" in config.agents.sisyphus, false);
   assert.equal("fallback_models" in config.agents.sisyphus, false);
 });
+
+test("applyCloudAssignments writes primary variant and structured fallback settings", () => {
+  const config = {
+    agents: {
+      oracle: {},
+    },
+    categories: {},
+  };
+
+  const total = applyCloudAssignments({
+    config,
+    confirmedModels: new Set(),
+    excludeFreeFromConfig: false,
+    recommendations: [
+      {
+        name: "oracle",
+        model: { provider: "openai", model: "gpt-5.5", variant: "high" },
+        routing: [],
+        fallback_models: [
+          { provider: "anthropic", model: "claude-opus-4-7", variant: "max" },
+          { provider: "opencode-go", model: "glm-5.1" },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(total, 1);
+  assert.equal(config.agents.oracle.model, "openai/gpt-5.5");
+  assert.equal(config.agents.oracle.variant, "high");
+  assert.deepEqual(config.agents.oracle.fallback_models, [
+    { model: "anthropic/claude-opus-4-7", variant: "max" },
+    "opencode-go/glm-5.1",
+  ]);
+});
