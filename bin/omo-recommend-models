@@ -23,13 +23,9 @@ import { execFileSync, execSync, spawn } from "node:child_process";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import mri from "mri";
-import pc from "picocolors";
 import {
   getConfigPath,
   getBackupPath,
-  confirm as plainConfirm,
-  promptUser as plainPromptUser,
   pickFreeModel,
   discoverFreeModels as originalDiscoverFreeModels,
   callOpencodeChat,
@@ -69,12 +65,11 @@ import {
   MODEL_SCORES,
   BASE_VRAM,
 } from "../lib/constants.js";
-import { RuntimeContext } from "../lib/runtime-context.js";
-import { SubprocessRunner } from "../lib/subprocess.js";
 import {
   backupConfig,
   writeConfigWithValidation,
 } from "../lib/recommend/apply.js";
+import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
 import {
   panelModelFamilyLabel,
   groupPanelModelRefs,
@@ -95,7 +90,6 @@ import {
   resultHasRejectedLocal,
   normalizeAgentRec,
   normalizeRecommendation,
-  setProgressClackState,
 } from "../lib/display-utils.js";
 import {
   providerState,
@@ -115,11 +109,6 @@ import {
   computeConsensus,
 } from "../lib/consensus.js";
 import {
-  pullModel,
-  applyCloudChanges,
-  applyLocalPlacements,
-  installAndUninstallModels,
-  offerUninstallOrphans,
   installedLocalNameSet,
 } from "../lib/apply-local.js";
 import {
@@ -131,10 +120,15 @@ import {
   rebalanceConfig,
   showRebalance,
 } from "../lib/rebalance.js";
+import {
+  CLI_VERSION,
+  parseCliOptions,
+  usage,
+} from "../lib/cli-options.js";
+import { createCliRuntime } from "../lib/cli-runtime.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const VERSION = "1.0.0";
 
 // Wrapper that injects monolith-local dependency functions into extracted defaultPanelModels
 function defaultPanelModels(config, cloudLookup = null, options = {}) {
@@ -145,88 +139,34 @@ function defaultPanelModels(config, cloudLookup = null, options = {}) {
   });
 }
 
-function discoverFreeModels() {
-  if (process.argv.includes('--no-free-panel')) {
+function discoverFreeModels(options = {}) {
+  if (options.noFreePanel) {
     return [];
   }
   return originalDiscoverFreeModels();
 }
 
-const ctx = new RuntimeContext();
-const subprocess = new SubprocessRunner(ctx);
-
-function usage() {
-  return [
-    "Usage: omo-recommend-models [options]",
-    "",
-    "Recommend OpenCode OMO model placements for oh-my-openagent.jsonc.",
-    "",
-    "Options:",
-    "  -y, --yes          Apply recommendations without interactive confirmation",
-    "      --rebalance    Perform algorithmic tier-chain restructuring",
-    "      --dry-run      Preview recommendations without writing config",
-    "      --cloud-only   Skip GPU, Ollama, and local model discovery",
-    "      --local-only   Skip cloud model discovery and API checks",
-    "      --model <ref>  Use an explicit AI panel model; may be repeated",
-    "      --exclude-rate-limited       Exclude providers after rate-limit errors",
-    "      --exclude-quota-restricted   Exclude providers after quota/billing errors",
-    "      --interactive  Force interactive prompts in non-TTY environments",
-    "      --dangerously-skip-permissions Skip validation permission checks",
-    "      --no-cache                    Skip cached panel results, run fresh",
-    "      --no-free-panel              Exclude free models from the AI Panel",
-    "      --free-panel                 Include free models in the AI Panel",
-    "      --exclude-free               Exclude free models from final JSONC configuration",
-    "      --no-exclude-free            Ensure free models are allowed in final JSONC",
-    "      --free-config                Include free models in JSONC configuration",
-    "      --no-free-config             Exclude free models from JSONC configuration",
-    "      --exclude-codex              Exclude codex CLI agent from the AI Panel",
-    "      --exclude-agy                Exclude agy CLI agent from the AI Panel",
-    "      --no-install                 Skip installation of recommended local models",
-    "      --no-uninstall               Skip removal of conflicting local models",
-    "      --no-remove-orphans          Skip pruning orphan Ollama models",
-    "      --no-rebalance-apply         Do not write restructuring changes in rebalance mode",
-    "      --no-apply                   Do not write final recommendations to config",
-    "      --debug        Print stack traces for errors",
-    "  -h, --help         Show this help",
-    "  -v, --version      Show version",
-  ].join("\n");
-}
+const runtime = createCliRuntime();
+const { ctx, subprocess } = runtime;
 
 function terminateActiveChildren() {
-  ctx.terminateActiveChildren();
+  runtime.terminateActiveChildren();
 }
 
 function installSignalHandlers() {
-  ctx.installSignalHandlers();
+  runtime.installSignalHandlers();
 }
 
 async function configureTerminalUi(enabled) {
-  ctx.useClackPrompts = Boolean(enabled);
-  if (!ctx.useClackPrompts) return;
-  try {
-    ctx.clack = await import("@clack/prompts");
-  } catch {
-    ctx.clack = null;
-  }
+  await runtime.configureTerminalUi(enabled);
 }
 
 async function confirm(question) {
-  if (ctx.useClackPrompts && ctx.clack?.confirm) {
-    const answer = await ctx.clack.confirm({
-      message: question.replace(/\s*\([^)]+\)\s*$/, "").trim(),
-      initialValue: false,
-    });
-    return answer === true;
-  }
-  return plainConfirm(question);
+  return runtime.confirm(question);
 }
 
 async function promptUser(question) {
-  if (ctx.useClackPrompts && ctx.clack?.text) {
-    const answer = await ctx.clack.text({ message: question.trim() });
-    return typeof answer === "string" ? answer.trim() : "";
-  }
-  return plainPromptUser(question);
+  return runtime.promptUser(question);
 }
 
 function commandExists(binary) {
@@ -2107,75 +2047,13 @@ function completeAiRecommendations(
 
 async function main() {
   installSignalHandlers();
-  const parsedArgs = mri(process.argv.slice(2), {
-    boolean: [
-      "yes",
-      "rebalance",
-      "dry-run",
-      "exclude-local",
-      "exclude-cloud",
-      "exclude-rate-limited",
-      "exclude-quota-restricted",
-      "debug",
-      "interactive",
-      "help",
-      "dangerously-skip-permissions",
-      "version",
-      "exclude-free",
-      "free-config",
-      "free-panel",
-      "exclude-codex",
-      "exclude-agy",
-      "cache",
-      "install",
-      "uninstall",
-      "remove-orphans",
-      "apply",
-      "rebalance-apply",
-    ],
-    string: ["model", "profile"],
-    alias: {
-      h: "help",
-      v: "version",
-      y: "yes",
-      "cloud-only": "exclude-local",
-      "local-only": "exclude-cloud",
-      "exclude-codex-cli": "exclude-codex",
-      "exclude-agy-cli": "exclude-agy",
-    },
-    default: {
-      yes: false,
-      rebalance: false,
-      "dry-run": false,
-      "exclude-local": false,
-      "exclude-cloud": false,
-      "exclude-rate-limited": false,
-      "exclude-quota-restricted": false,
-      debug: false,
-      interactive: false,
-      help: false,
-      "dangerously-skip-permissions": false,
-      version: false,
-      "exclude-free": false,
-      "free-config": false,
-      "free-panel": false,
-      "exclude-codex": false,
-      "exclude-agy": false,
-      cache: true,
-      install: true,
-      uninstall: true,
-      "remove-orphans": true,
-      apply: true,
-      "rebalance-apply": false,
-      profile: undefined,
-    },
-  });
+  const parsedArgs = parseCliOptions(process.argv.slice(2));
   if (parsedArgs.help) {
     console.log(usage());
     return;
   }
   if (parsedArgs.version) {
-    console.log(VERSION);
+    console.log(CLI_VERSION);
     return;
   }
   const doRebalance = parsedArgs.rebalance;
@@ -2184,10 +2062,7 @@ async function main() {
     Boolean(process.stdout.isTTY) &&
     process.env.TERM !== "dumb" &&
     process.env.CI !== "true";
-  // Detect explicit --yes/--no-yes
-  const yesExplicitlyPassed = process.argv.includes('--yes') || process.argv.includes('-y');
-  const noYesExplicitlyPassed = process.argv.includes('--no-yes');
-  const explicitYes = yesExplicitlyPassed && !noYesExplicitlyPassed;
+  const explicitYes = parsedArgs._explicitYes;
 
   const interactive = parsedArgs.interactive || realTty;
   const dryRunFallback = !interactive && !explicitYes;
@@ -2209,7 +2084,6 @@ async function main() {
     .map((model) => model.trim());
 
   await configureTerminalUi(realTty);
-  setProgressClackState(ctx.useClackPrompts, ctx.clack);
   if (dryRunFallback) {
     console.log(
       "  • Non-interactive environment detected; previewing changes only. Pass --yes to apply.",
@@ -2462,10 +2336,10 @@ async function main() {
       ? initialCloudLookup
       : buildRichModelLookup(cache);
 
-  const excludeFreeExplicit = process.argv.includes('--exclude-free');
-  const noExcludeFreeExplicit = process.argv.includes('--no-exclude-free');
-  const freeConfigExplicit = process.argv.includes('--free-config');
-  const noFreeConfigExplicit = process.argv.includes('--no-free-config');
+  const excludeFreeExplicit = parsedArgs._excludeFreeExplicit;
+  const noExcludeFreeExplicit = parsedArgs._noExcludeFreeExplicit;
+  const freeConfigExplicit = parsedArgs._freeConfigExplicit;
+  const noFreeConfigExplicit = parsedArgs._noFreeConfigExplicit;
 
   let excludeFreeFromConfig = false;
   if (excludeFreeExplicit || noFreeConfigExplicit) {
@@ -2479,6 +2353,7 @@ async function main() {
     excludeAgy: parsedArgs["exclude-agy"],
     excludeFree: excludeFreeFromConfig || parsedArgs["exclude-free"],
     freePanel: parsedArgs["free-panel"],
+    noFreePanel: parsedArgs._noFreePanelExplicit,
     noCache: !parsedArgs.cache,
   };
 
@@ -2600,7 +2475,7 @@ async function main() {
       // Discover available sources first
       await ensureProbesAwaited();
       const availablePaid = await paidProbesPromise;
-      const freeModels = discoverFreeModels();
+      const freeModels = discoverFreeModels(cliOptions);
       const cliAgents = discoverCliModels(config, cliOptions);
       
       // Probe CLI agents to verify they work before including them
@@ -2693,8 +2568,8 @@ async function main() {
         
         // Prompt for AI Panel analysis (default Yes)
         let includeInPanel = true;
-        const freePanelExplicit = process.argv.includes('--free-panel');
-        const noFreePanelExplicit = process.argv.includes('--no-free-panel');
+        const freePanelExplicit = parsedArgs._freePanelExplicit;
+        const noFreePanelExplicit = parsedArgs._noFreePanelExplicit;
         if (noFreePanelExplicit) {
           includeInPanel = false;
         } else if (freePanelExplicit) {
@@ -2796,7 +2671,7 @@ async function main() {
         console.log("  • AI CLI agent cli/agy considered");
       }
       
-      const noFreePanelExplicit = process.argv.includes('--no-free-panel');
+      const noFreePanelExplicit = parsedArgs._noFreePanelExplicit;
       if (noFreePanelExplicit) {
         console.log("  • Free models excluded from AI Panel via --no-free-panel");
       } else {
@@ -2903,139 +2778,19 @@ async function main() {
     }
   }
 
-  // Backup
-  if (backupConfig(getConfigPath(), getBackupPath())) {
-    console.log(`  \u2713 Backup saved to ${getBackupPath()}`);
-  }
-
-  // Local models must be installed/confirmed before config refs are written.
-  const confirmedModels = await installAndUninstallModels(
-    aiResult.localModels?.decisions,
+  await applyRecommendations({
+    aiResult,
+    config,
     ollama,
+    allLocalModels,
     autoYes,
-    !parsedArgs.install,
-    !parsedArgs.uninstall,
-  );
-
-  // Apply model assignments after filtering out unconfirmed local refs.
-  let totalCloud = 0;
-  if (aiResult.cloudRecommendations) {
-    for (const rec of aiResult.cloudRecommendations) {
-      const section =
-        config.agents?.[rec.name] || config.categories?.[rec.name];
-      if (!section) continue;
-
-      // Filter unconfirmed local models from all three fields
-      const localOk = (r) =>
-        r.provider !== LOCAL_PROVIDER ||
-        (confirmedModels &&
-          confirmedModels.has(normalizeLocalModelName(r.model)));
-
-      // Filter free models from JSONC config if user chose to exclude them
-      const freeOk = (r) =>
-        !excludeFreeFromConfig || r.provider !== "opencode";
-
-      const modelOk = rec.model && localOk(rec.model) && freeOk(rec.model);
-      const routingOk = (rec.routing || []).filter(r => localOk(r) && freeOk(r));
-      const fbOk = (rec.fallback_models || []).filter(r => localOk(r) && freeOk(r));
-
-      if (!modelOk && routingOk.length === 0 && fbOk.length === 0) continue;
-
-      if (modelOk) section.model = `${rec.model.provider}/${rec.model.model}`;
-      section.routing =
-        routingOk.length > 0
-          ? routingOk.map((r) => `${r.provider}/${r.model}`)
-          : undefined;
-      section.fallback_models =
-        fbOk.length > 0
-          ? fbOk.map((r) => `${r.provider}/${r.model}`)
-          : undefined;
-      // Clean up undefined keys
-      if (!section.routing) delete section.routing;
-      if (!section.fallback_models) delete section.fallback_models;
-      totalCloud++;
-    }
-  }
-
-  let totalLocal = 0;
-  if (aiResult.localModels && aiResult.localModels.placements) {
-    const confirmedPlacements = aiResult.localModels.placements.filter((p) =>
-      confirmedModels.has(normalizeLocalModelName(p.modelName)),
-    );
-    if (confirmedPlacements.length > 0) {
-      totalLocal = await applyLocalPlacements(
-        confirmedPlacements,
-        config,
-        autoYes,
-        allLocalModels,
-      );
-    }
-  }
-
-  console.log(`  Backup: ${getBackupPath()}`);
-  const totalChanges = totalCloud + totalLocal;
-
-  // Validate — roll back on failure
-  console.log("\u2192 Validating changes...");
-  try {
-    writeConfigWithValidation({
-      config,
-      configPath: getConfigPath(),
-      backupPath: getBackupPath(),
-      validatorPath: path.join(__dirname, "omo-validate-config"),
-      validateStdio: ["inherit", "inherit", "pipe"],
-    });
-    console.log(`\u2705 ${totalChanges} section(s) updated.\n`);
-  } catch (validationErr) {
-    const stderr = validationErr.stderr ? validationErr.stderr.toString() : "";
-    console.error(`\n\u2716 Validation FAILED.`);
-    if (stderr) {
-      for (const line of stderr.trim().split("\n")) {
-        console.error(`  ${line}`);
-      }
-    }
-    // Restore from the backup taken before applying
-    if (fs.existsSync(getBackupPath())) {
-      console.log(
-        `  \u2713 Reverted to previous config (backup at ${getBackupPath()})`,
-      );
-    } else {
-      console.log(
-        `  \u26A0 No backup found at ${getBackupPath()} \u2014 config on disk may be invalid.`,
-      );
-    }
-    console.log(
-      `  Recommendations were NOT applied. Fix the issues above and re-run.`,
-    );
-    throw new Error(
-      `Validation failed after applying recommendations. Config was reverted to backup.`,
-    );
-  }
-
-  // Step 4: Offer to remove models the AI never considered
-  await offerUninstallOrphans(
-    aiResult.localModels?.decisions,
-    ollama,
-    autoYes,
-    !parsedArgs["remove-orphans"],
-  );
-
-  console.log("\n\u2705 Done.");
+    install: parsedArgs.install,
+    uninstall: parsedArgs.uninstall,
+    removeOrphans: parsedArgs["remove-orphans"],
+    excludeFreeFromConfig,
+    validatorPath: path.join(__dirname, "omo-validate-config"),
+  });
 }
 
 main()
-  .catch((e) => {
-    console.error(`\n${pc.red("\u2716 " + (e.message || String(e)))}`);
-    if (ctx.debugMode && e.stack) {
-      console.error(e.stack);
-    }
-    // Show execSync stderr if available (validation failures, subprocess errors, etc.)
-    if (e.stderr) {
-      const stderrText =
-        typeof e.stderr === "string" ? e.stderr : e.stderr.toString();
-      for (const line of stderrText.trim().split("\n")) {
-        console.error(`  ${line}`);
-      }
-    }
-    process.exitCode = 1;
-  });
+  .catch((error) => runtime.handleFatalError(error));

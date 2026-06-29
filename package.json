@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.7.0",
-    "mri": "^1.2.0",
+    "commander": "^12.1.0",
     "picocolors": "^1.0.1"
   }
 }
