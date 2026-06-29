@@ -57,8 +57,6 @@ import {
   MIN_PANEL_CONTEXT_TOKENS,
   MODEL_CACHE_FILE,
   PANEL_CACHE_FILE,
-  loadPanelCache,
-  savePanelCache,
   modelListEquals,
   isSubsetList,
   KNOWN_MODELS,
@@ -70,24 +68,20 @@ import {
   writeConfigWithValidation,
 } from "../lib/recommend/apply.js";
 import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
+import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
 import {
   panelModelFamilyLabel,
-  groupPanelModelRefs,
   printNumberedPanelModelGroups,
   printSelectablePanelModelGroups,
-  configuredPanelModels,
-  panelModelsRequireOpencode,
   selectedPanelRequiresOpencode,
   opencodePanelModelsFromLookup,
   defaultPanelModels as defaultPanelModelsImpl,
-  plannedPanelModels,
   createProgress,
   usableLocalVramGb,
   buildFittingModels,
   buildFittingModelMap,
   resolveFittingLocalName,
   normalizeLocalRecommendation,
-  resultHasRejectedLocal,
   normalizeAgentRec,
   normalizeRecommendation,
 } from "../lib/display-utils.js";
@@ -2385,7 +2379,6 @@ async function main() {
   // 4) default top 5 ordered by `omo.panel_model_order` ("opencode-first"
   // unless set to "score").
   let aiResult;
-  let panel = null;
   const localCtx = cloudOnlyFlag ? [] : allLocalModels;
   const gpuCtx = cloudOnlyFlag
     ? {
@@ -2399,325 +2392,55 @@ async function main() {
     ? { installed: false, running: false, version: null, models: [] }
     : ollama;
 
-  // Check for cached panel result first (early cache prompt while background queries are running)
-  if (!autoYes && !dryRun && !cliOptions.noCache) {
-    const cached = loadPanelCache();
-    if (cached) {
-      const age = Date.now() - cached.timestamp;
-      const ageStr =
-        age > 86400000
-          ? `${(age / 86400000).toFixed(1)}d`
-          : age > 3600000
-            ? `${(age / 3600000).toFixed(1)}h`
-            : `${Math.round(age / 60000)}m`;
-      const ts = new Date(cached.timestamp)
-        .toISOString()
-        .replace("T", " ")
-        .slice(0, 19);
-
-      const cachedModelList =
-        cached.models || cached.result?.panel?.models || [];
-
-      console.log(`\nCached panel result:`);
-      if (cachedModelList.length > 0) {
-        console.log(`  \u2022 Surveyed AI models:`);
-        printNumberedPanelModelGroups(cachedModelList, "    ");
-      }
-      if (cached.gpu && cached.gpu.label) {
-        const gpuLine = `  \u2022 Hardware: ${cached.gpu.label}`;
-        console.log(
-          cached.gpu.vramGb
-            ? `${gpuLine} (${cached.gpu.vramGb} GB VRAM)`
-            : gpuLine,
-        );
-      }
-      console.log(`  \u2022 Recorded: ${ts} (${ageStr} ago)`);
-
-      const useCached = await confirm(`\nUse cached? (y/N) `);
-      if (useCached) {
-        await ensureProbesAwaited();
-        const fittingByName = buildFittingModelMap(localCtx, gpuCtx);
-        if (resultHasRejectedLocal(cached.result, fittingByName)) {
-          console.log(
-            `  \u2022 Cached result references unavailable local models; running fresh.\n`,
-          );
-        } else {
-          aiResult = completeAiRecommendations(
-            cached.result,
-            config,
-            cloudLookup,
-            localCtx,
-            gpuCtx,
-            ollamaCtx,
-          );
-          panel = cached.result.panel || null;
-          console.log(`  \u2713 Loaded cached panel result.\n`);
-        }
-      }
-    }
-  } else {
-  }
-
-  // Determine which panel models to use
-  // Priority: 1) --model CLI flags, 2) interactive picker, 3) omo.panel_models,
-  // 4) default top 5 ordered by `omo.panel_model_order` ("opencode-first"
-  // unless set to "score").
-  let panelModels = null;
-  if (!aiResult) {
-    if (explicitModels.length > 0) {
-      panelModels = filterPanelModelsForContext(explicitModels, cloudLookup);
-      panelModels = includeDetectedCliPanelModels(panelModels, config, cliOptions);
-      console.log(
-        `  \u2713 Using ${panelModels.length} explicitly selected model(s): ${panelModels.join(", ")}\n`,
-      );
-      printCliPanelDisclosure(panelModels, "Explicit");
-    } else if (!autoYes && !dryRun && !localOnlyFlag) {
-      // Discover available sources first
-      await ensureProbesAwaited();
-      const availablePaid = await paidProbesPromise;
-      const freeModels = discoverFreeModels(cliOptions);
-      const cliAgents = discoverCliModels(config, cliOptions);
-      
-      // Probe CLI agents to verify they work before including them
-      const workingCliAgents = [];
-      if (cliAgents.length > 0) {
-        const progress = createProgress("Verifying CLI agents availability");
-        const cliProbeResults = await Promise.all(
-          cliAgents.map(async (agent) => {
-            const result = await agent.probe();
-            return { agent, ok: result.ok };
-          })
-        );
-        for (const { agent, ok } of cliProbeResults) {
-          if (ok) {
-            workingCliAgents.push(agent);
-          } else {
-            console.log(`  \u2192 CLI agent ${agent.ref} failed probe, excluding from AI Panel`);
-          }
-        }
-        progress.done(`${workingCliAgents.length} of ${cliAgents.length} CLI agent(s) available`);
-      }
-      
-      // Show the three options
-      console.log("\nYou will have a chance to influence which AI providers will be involved in performing your AI Model analysis.");
-      console.log("You will be able to choose from:");
-      console.log("  1.) Local AI CLI agents (installed on your system)");
-      console.log("  2.) AI providers connected to opencode via 'opencode auth login'");
-      console.log("  3.) Free AI models available through opencode");
-      console.log("");
-      
-      if (workingCliAgents.length > 0) {
-        console.log("  Local AI CLI agents available:");
-        for (const agent of workingCliAgents) {
-          console.log(`    • ${agent.ref}${agent.panelModel ? ` (model: ${agent.panelModel})` : ''}`);
-        }
-        console.log("");
-      }
-      
-      if (availablePaid.length > 0) {
-        console.log("  AI providers connected to opencode:");
-        printNumberedPanelModelGroups(availablePaid, "    ");
-        console.log("");
-      }
-      
-      if (freeModels.length > 0) {
-        console.log("  Free opencode models:");
-        printNumberedPanelModelGroups(freeModels, "    ");
-        console.log("");
-      }
-      
-      // Let user choose
-      const options = [];
-      if (workingCliAgents.length > 0) options.push({ label: "1", description: "Local AI CLI agents only" });
-      if (availablePaid.length > 0) options.push({ label: "2", description: "Connected opencode providers (paid/cloud)" });
-      if (freeModels.length > 0) options.push({ label: "3", description: "Free opencode models" });
-      options.push({ label: "a", description: "All of the above (default)" });
-      
-      console.log("Options:");
-      for (const opt of options) {
-        console.log(`  [${opt.label}] ${opt.description}`);
-      }
-      
-      const answer = await promptUser("\nChoose source(s) for AI Panel (e.g. 1,2 or 'a' for all): ");
-      const choices = answer.trim().toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
-      
-      const selectedModels = [];
-      if (choices.includes("a") || choices.length === 0 || (choices.includes("1") && choices.includes("2") && choices.includes("3"))) {
-        // All
-        selectedModels.push(...workingCliAgents.map(a => a.ref));
-        selectedModels.push(...availablePaid);
-        selectedModels.push(...freeModels);
-      } else {
-        if (choices.includes("1")) selectedModels.push(...workingCliAgents.map(a => a.ref));
-        if (choices.includes("2")) selectedModels.push(...availablePaid);
-        if (choices.includes("3")) selectedModels.push(...freeModels);
-      }
-      
-      if (selectedModels.length > 0) {
-        panelModels = filterPanelModelsForContext(selectedModels, cloudLookup);
-        panelModels = includeDetectedCliPanelModels(panelModels, config, cliOptions);
-        console.log(`  \u2713 Using ${panelModels.length} selected model(s)\n`);
-        printCliPanelDisclosure(panelModels, "Selected");
-      }
-
-      // Explicit prompt for free model inclusion/exclusion
-      // Check if free models were selected (either explicitly via option 3, or via "all")
-      const freeModelsSelected = choices.includes("3") || choices.includes("a") || choices.length === 0 || (choices.includes("1") && choices.includes("2") && choices.includes("3"));
-      if (freeModelsSelected && freeModels.length > 0 && !autoYes && !dryRun) {
-        console.log("\n\uD83D\uDD0D Free models detected: " + freeModels.join(", "));
-        
-        // Prompt for AI Panel analysis (default Yes)
-        let includeInPanel = true;
-        const freePanelExplicit = parsedArgs._freePanelExplicit;
-        const noFreePanelExplicit = parsedArgs._noFreePanelExplicit;
-        if (noFreePanelExplicit) {
-          includeInPanel = false;
-        } else if (freePanelExplicit) {
-          includeInPanel = true;
-        } else {
-          includeInPanel = await confirm(
-            "Include free models in the AI Panel analysis? (Y/n) "
-          );
-        }
-        
-        // Prompt for JSONC configuration (default Yes)
-        let includeInConfig = !excludeFreeFromConfig;
-        if (!excludeFreeExplicit && !freeConfigExplicit && !noFreeConfigExplicit && !noExcludeFreeExplicit) {
-          includeInConfig = await confirm(
-            "Include free models in the JSONC configuration file? (Y/n) "
-          );
-        }
-        
-        // Filter panelModels based on user choices
-        const freeModelRefs = freeModels.filter(f => panelModels.includes(f));
-        if (!includeInPanel) {
-          // Remove free models from panelModels (AI Panel analysis)
-          panelModels = panelModels.filter(m => !freeModelRefs.includes(m));
-          console.log(`  \u2192 Free models excluded from AI Panel analysis`);
-        }
-        if (!includeInConfig) {
-          // Store the preference for later use in JSONC config
-          excludeFreeFromConfig = true;
-          console.log(`  \u2192 Free models will be excluded from JSONC configuration`);
-        } else {
-          excludeFreeFromConfig = false;
-          console.log(`  \u2192 Free models will be included in JSONC configuration`);
-        }
-      }
-    }
-
-    if (!panelModels) {
-      const configuredModels = configuredPanelModels(config);
-      if (configuredModels.length > 0) {
-        panelModels = filterPanelModelsForContext(configuredModels, cloudLookup);
-        panelModels = includeDetectedCliPanelModels(panelModels, config, cliOptions);
-        console.log(
-          `  \u2713 Using ${panelModels.length} configured panel model(s): ${panelModels.join(", ")}\n`,
-        );
-        printCliPanelDisclosure(panelModels, "Configured");
-      }
-    }
-
-    // Fallback to default if still not set (e.g., if autoYes, dryRun, or localOnlyFlag skipped prompt)
-    if (!panelModels) {
-      await ensureProbesAwaited();
-      const availablePaid = await paidProbesPromise;
-      if (availablePaid.length > 0 && !localOnlyFlag) {
-        panelModels = selectPreferredPanelModels(
-          availablePaid,
+  try {
+    const panelSelection = await selectPanelRecommendation({
+      autoYes,
+      cloudLookup,
+      cloudOnlyFlag,
+      completeAiRecommendations: (result) =>
+        completeAiRecommendations(
+          result,
           config,
           cloudLookup,
-          MAX_PANEL_MODELS,
+          localCtx,
+          gpuCtx,
+          ollamaCtx,
+        ),
+      config,
+      confirm,
+      ctx,
+      defaultPanelModels,
+      discoverCliModels,
+      discoverFreeModels,
+      dryRun,
+      ensureProbesAwaited,
+      explicitModels,
+      filterPanelModelsForContext,
+      getAvailablePaid: () => paidProbesPromise,
+      gpuCtx,
+      includeDetectedCliPanelModels,
+      initialExcludeFreeFromConfig: excludeFreeFromConfig,
+      localCtx,
+      localOnlyFlag,
+      parsedArgs,
+      printCliPanelDisclosure,
+      promptUser,
+      runPanelAndSelect: (panelModels) =>
+        runPanelAndSelect(
+          config,
+          cloudLookup,
+          localCtx,
+          gpuCtx,
+          ollamaCtx,
+          cloudOnlyFlag,
+          panelModels,
           cliOptions,
-        );
-      } else {
-        panelModels = defaultPanelModels(config, cloudLookup, cliOptions);
-        ctx.opencodeOnlyMode = true;
-      }
-    }
-  }
-  // (Old cache checking block removed)
-
-  try {
-    if (!aiResult) {
-      // Transparency logs for model considerations and exclusions
-      console.log("\n── AI Panel Considerations & Exclusions ──");
-      if (cloudOnlyFlag) {
-        console.log("  • Local / Ollama models excluded via --exclude-local");
-      } else {
-        console.log("  • Local / Ollama models considered");
-      }
-
-      if (localOnlyFlag) {
-        console.log("  • Cloud / paid models excluded via --exclude-cloud");
-      } else {
-        console.log("  • Cloud / paid models considered");
-      }
-
-      if (cliOptions.noCache) {
-        console.log("  • Panel cache disabled via --no-cache");
-      } else {
-        console.log("  • Panel cache enabled");
-      }
-
-      if (cliOptions.excludeCodex) {
-        console.log("  • AI CLI agent cli/codex excluded via --exclude-codex");
-      } else {
-        console.log("  • AI CLI agent cli/codex considered");
-      }
-      if (cliOptions.excludeAgy) {
-        console.log("  • AI CLI agent cli/agy excluded via --exclude-agy");
-      } else {
-        console.log("  • AI CLI agent cli/agy considered");
-      }
-      
-      const noFreePanelExplicit = parsedArgs._noFreePanelExplicit;
-      if (noFreePanelExplicit) {
-        console.log("  • Free models excluded from AI Panel via --no-free-panel");
-      } else {
-        console.log("  • Free models considered for AI Panel");
-      }
-
-      if (excludeFreeFromConfig) {
-        console.log("  • Free models excluded from JSONC configuration");
-      } else {
-        console.log("  • Free models considered for JSONC configuration");
-      }
-      console.log("");
-
-      // Ensure background paid model preparation has completed before running the panel.
-      await ensureProbesAwaited();
-
-      // Multi-model panel: all free models recommend in parallel, debate, user picks
-      const panelResult = await runPanelAndSelect(
-        config,
-        cloudLookup,
-        localCtx,
-        gpuCtx,
-        ollamaCtx,
-        cloudOnlyFlag,
-        panelModels,
-        cliOptions,
-      );
-      aiResult = completeAiRecommendations(
-        panelResult.selected,
-        config,
-        cloudLookup,
-        localCtx,
-        gpuCtx,
-        ollamaCtx,
-      );
-      panel = panelResult.panel;
-      // Save cache for future runs (include model list and GPU info for invalidation)
-      savePanelCache(
-        {
-          ...panelResult.selected,
-          panel: { models: panelResult.panel?.models },
-        },
-        panelModels,
-        gpuCtx,
-      );
-    }
+        ),
+      selectPreferredPanelModels,
+      cliOptions,
+    });
+    aiResult = panelSelection.aiResult;
+    excludeFreeFromConfig = panelSelection.excludeFreeFromConfig;
   } catch (e) {
     console.error(`\n\u2716 AI recommendation failed: ${e.message}`);
     if (fs.existsSync(getConfigPath())) {
