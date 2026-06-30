@@ -1,7 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resultHasRejectedLocal } from "../../lib/display-utils.js";
+import {
+  formatAiAnalysis,
+  resultHasRejectedLocal,
+} from "../../lib/display-utils.js";
+
+test("formatAiAnalysis preserves provider groups inside unresolved rule chains", () => {
+  const analysis = [
+    "Assigned from upstream oh-my-openagent model fallback rules after loading provider availability.",
+    "No available rule-chain model for:",
+    "visual-engineering (tried: (google, github-copilot, opencode, vercel)/gemini-3.1-pro > (opencode-go, vercel)/glm-5.1),",
+    "writing (tried: (google, github-copilot, opencode, vercel)/gemini-3-flash > (opencode-go, vercel)/kimi-k2.6).",
+  ].join(" ");
+
+  const formatted = formatAiAnalysis(analysis);
+
+  assert.match(
+    formatted,
+    /• visual-engineering \(tried: \(google, github-copilot, opencode, vercel\)\/gemini-3\.1-pro > \(opencode-go, vercel\)\/glm-5\.1\)/,
+  );
+  assert.match(
+    formatted,
+    /• writing \(tried: \(google, github-copilot, opencode, vercel\)\/gemini-3-flash > \(opencode-go, vercel\)\/kimi-k2\.6\)/,
+  );
+  assert.doesNotMatch(formatted, /\n  • github-copilot/);
+  assert.doesNotMatch(formatted, /\n  • opencode/);
+  assert.doesNotMatch(formatted, /\n  • vercel\)/);
+});
 
 test("resultHasRejectedLocal rejects cached locals that do not fit the specific entry", () => {
   const fittingByName = new Map([
