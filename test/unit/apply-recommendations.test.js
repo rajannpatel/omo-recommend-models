@@ -110,3 +110,38 @@ test("applyCloudAssignments writes primary variant and structured fallback setti
     "opencode-go/glm-5.1",
   ]);
 });
+
+test("applyCloudAssignments removes blocked providers before writing", () => {
+  const config = {
+    agents: {
+      sisyphus: {
+        model: "old/provider",
+        fallback_models: ["blocked/stale"],
+      },
+    },
+    categories: {},
+  };
+
+  const total = applyCloudAssignments({
+    config,
+    confirmedModels: new Set(),
+    excludeFreeFromConfig: false,
+    isProviderAllowed: (provider) => provider !== "blocked",
+    recommendations: [
+      {
+        name: "sisyphus",
+        model: { provider: "blocked", model: "primary" },
+        routing: [{ provider: "blocked", model: "route" }],
+        fallback_models: [
+          { provider: "blocked", model: "fallback" },
+          { provider: "paid", model: "fallback" },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(total, 1);
+  assert.equal(config.agents.sisyphus.model, "old/provider");
+  assert.equal("routing" in config.agents.sisyphus, false);
+  assert.deepEqual(config.agents.sisyphus.fallback_models, ["paid/fallback"]);
+});

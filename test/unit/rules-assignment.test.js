@@ -70,9 +70,63 @@ test("createRuleBasedRecommendations strips manually excluded providers and mode
     "openai",
     "opencode-go/kimi-k2.6",
   ]);
-  assert.equal(result.cloudRecommendations.length, 1);
-  assert.equal(result.cloudRecommendations[0].name, "sisyphus");
-  assert.equal(result.cloudRecommendations[0].model.provider, "opencode");
-  assert.equal(result.cloudRecommendations[0].model.model, "big-pickle");
-  assert.match(result.analysis, /No available rule-chain model for: hephaestus/);
+  assert.equal(result.cloudRecommendations.length, 2);
+  const sisyphus = result.cloudRecommendations.find((rec) => rec.name === "sisyphus");
+  assert.equal(sisyphus.model.provider, "opencode");
+  assert.equal(sisyphus.model.model, "big-pickle");
+  const hephaestus = result.cloudRecommendations.find((rec) => rec.name === "hephaestus");
+  assert.equal(hephaestus.model.provider, "opencode");
+  assert.equal(hephaestus.model.model, "big-pickle");
+  assert.match(result.analysis, /hephaestus \(using best available paid\/free outside rule chain\)/);
+});
+
+test("createRuleBasedRecommendations excludes unavailable providers everywhere", () => {
+  const config = {
+    agents: {
+      sisyphus: { description: "orchestrator" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "opencode-go": ["kimi-k2.6"],
+      openai: ["gpt-5.5"],
+      opencode: ["big-pickle"],
+    }),
+    isProviderAllowed: (provider) => provider !== "opencode-go",
+  });
+
+  const sisyphus = result.cloudRecommendations[0];
+  assert.equal(sisyphus.model.provider, "openai");
+  assert.equal(sisyphus.model.model, "gpt-5.5");
+  assert.deepEqual(
+    sisyphus.fallback_models.map((ref) => ref.provider),
+    ["opencode"],
+  );
+});
+
+test("createRuleBasedRecommendations uses paid and free picks after chain exhaustion", () => {
+  const config = {
+    agents: {
+      hephaestus: { description: "deep worker" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      paid: ["large-pro"],
+      opencode: ["utility-free"],
+    }),
+  });
+
+  const hephaestus = result.cloudRecommendations[0];
+  assert.equal(hephaestus.model.provider, "paid");
+  assert.equal(hephaestus.model.model, "large-pro");
+  assert.equal(hephaestus.fallback_models[0].provider, "opencode");
+  assert.equal(hephaestus.fallback_models[0].model, "utility-free");
+  assert.match(result.analysis, /outside rule chain/);
 });

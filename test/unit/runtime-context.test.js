@@ -14,8 +14,8 @@ test("RuntimeContext constructor initializes all fields", () => {
   assert.ok(ctx.quotaExceededProviders instanceof Set);
   assert.ok(ctx.providerAvailability instanceof Map);
   assert.deepEqual(ctx.providerExclusionOptions, {
-    quotaRestricted: false,
-    rateLimited: false,
+    quotaRestricted: true,
+    rateLimited: true,
   });
   assert.equal(ctx.opencodeOnlyMode, false);
   assert.ok(ctx.providerProbePromises instanceof Map);

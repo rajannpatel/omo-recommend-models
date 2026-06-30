@@ -65,9 +65,9 @@ evaluating -
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--exclude-free` | `false` | Exclude free/open-source models from the final JSONC configuration output. Free models will not appear in `model`, `routing`, or `fallback_models`. |
+| `--exclude-free` | `false` | Exclude free/open-source models from the final JSONC configuration output. Free models are included by default. |
 | `--no-exclude-free` | `false` | Negation of `--exclude-free`. Ensures free models are allowed in the final JSONC configuration. |
-| `--free-config` | `false` | Explicitly include free models in the JSONC configuration file. |
+| `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
 | `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
 | `--free-panel` | `false` | Explicitly include free/open-source models in the AI Panel evaluation. |
 | `--no-free-panel` | `false` | Negation of `--free-panel`. Exclude free models from the AI Panel model selection. |
@@ -75,8 +75,8 @@ evaluating -
 | `--exclude-codex-cli` | `false` | Alias for `--exclude-codex`. |
 | `--exclude-agy` | `false` | Exclude `cli/agy` (Agy CLI agent) from the AI Panel. |
 | `--exclude-agy-cli` | `false` | Alias for `--exclude-agy`. |
-| `--exclude-rate-limited` | `false` | Exclude providers that returned rate-limit (HTTP 429) errors during probing. Without this flag, rate-limited providers remain eligible. |
-| `--exclude-quota-restricted` | `false` | Exclude providers with quota, billing, credit, or payment errors. Without this flag, quota-restricted providers remain eligible. |
+| `--exclude-rate-limited` | `true` | Compatibility flag. Providers that return rate-limit (HTTP 429) errors are excluded once detected. |
+| `--exclude-quota-restricted` | `true` | Compatibility flag. Providers with quota, billing, credit, auth, or payment errors are excluded once detected. |
 
 ### Behavior Flags
 
@@ -187,7 +187,7 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
     If local discovery is enabled, the tool checks GPU/VRAM and Ollama, then only presents local models that fit the detected hardware. Local models are never placed in `routing`; they are used as primaries only when the recommendation explicitly chooses a local-first role, or as `fallback_models` for offline/quota-limited operation.
 * **Rate-limit and quota filtering**
 
-    Rate-limited and quota-restricted providers are included by default. Passing `--exclude-rate-limited` filters providers after a 429/rate-limit probe. Passing `--exclude-quota-restricted` filters providers after quota, billing, credit, auth, or payment errors. Without those flags, the tool does not exclude an entire provider, family, or model just because a probe failed.
+    Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured paid providers before deterministic rule matching or AI panel selection, removes blocked providers from primary, routing, and `fallback_models`, and sanitizes cached/panel recommendations before writing JSONC.
 * **Panel model selection**
 
     If you pass `--model provider/model`, those models are used for the AI panel. Otherwise the CLI can use configured `omo.panel_models`, selected paid models, or the default top free OpenCode panel models.

@@ -740,6 +740,11 @@ test("panel picker label and recommendation preview uses bulleted format", async
 test("canonical local output is local slash refs and local models never enter routing", async (t) => {
   const harness = createHarness(t, {
     config: defaultConfig({ sisyphus: { model: "opencode/north-mini-code-free" } }),
+    providerCache: {
+      models: {
+        opencode: [{ id: "north-mini-code-free", family: "opencode-north", context_length: 32000 }],
+      },
+    },
     gpu: { name: "Small Test GPU", vramGb: 8 },
     localCatalog: [
       { name: "tinyllama:1.1b", size: "0.6 GB", vram: 0.2, score: 30, baseModel: "tinyllama", tag: "1.1b" },
@@ -753,7 +758,7 @@ test("canonical local output is local slash refs and local models never enter ro
           name: "sisyphus",
           type: "agent",
           profile: "orchestrator",
-          model: { provider: "opencode", model: "big-pickle", reason: "best cloud" },
+          model: { provider: "opencode", model: "north-mini-code-free", reason: "best cloud" },
           routing: [{ provider: "ollama", model: "tinyllama:1.1b", reason: "bad local route" }],
           fallback_models: [{ provider: "ollama", model: "tinyllama:1.1b", reason: "local fallback" }],
         },
@@ -765,13 +770,23 @@ test("canonical local output is local slash refs and local models never enter ro
     },
   });
 
-  const result = await runCli(harness.env, "", ["-y", "--local-only", "--model", "opencode/big-pickle"]);
+  const result = await runCli(
+    harness.env,
+    "",
+    ["-y", "--ai-panel", "--model", "opencode/north-mini-code-free"],
+  );
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   const written = readConfig(harness.configPath);
   assert.deepEqual(written.agents.sisyphus.routing || [], []);
-  assert.ok((written.agents.sisyphus.fallback_models || []).includes("local/tinyllama:1.1b"));
+  const localRefs = [
+    written.agents.sisyphus.model,
+    ...(written.agents.sisyphus.fallback_models || []),
+  ];
+  assert.ok(
+    localRefs.includes("local/tinyllama:1.1b"),
+  );
   assert.doesNotMatch(fs.readFileSync(harness.configPath, "utf8"), /ollama\/tinyllama:1\.1b/);
 });
 
@@ -883,7 +898,7 @@ test("validator rollback integration uses sibling validator and restores config"
   assert.equal(fs.readFileSync(normal.configPath, "utf8"), normalOriginal);
 });
 
-test("selected quota exceeded panel models are rejected by default", async (t) => {
+test("selected quota exceeded panel models are excluded from config by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -915,9 +930,8 @@ test("selected quota exceeded panel models are rejected by default", async (t) =
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  // Quota-exceeded models should now be ALLOWED in the final JSONC config
-  // (they're only excluded from the AI Panel analysis)
-  assert.equal(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+  assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
+  assert.equal(configJson.agents.sisyphus.fallback_models, undefined);
   assert.match(result.stdout, /quota-exceeded-prov.*model-1/);
   assert.match(result.stdout, /quota-exceeded/);
 });
@@ -958,13 +972,11 @@ test("quota exceeded errors block recommendations with exclude flag", async (t) 
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  // With --exclude-quota-restricted, quota models are excluded from AI Panel
-  // but should still appear in the final config if the AI recommended them
-  // (the flag only affects panel availability, not the final config)
+  assert.notEqual(configJson.agents.sisyphus.model, "quota-exceeded-prov/model-1");
   assert.match(result.stdout, /quota-exceeded/);
 });
 
-test("selected stdout quota errors are rejected by default", async (t) => {
+test("selected stdout quota errors are excluded from config by default", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced" } });
   const harness = createHarness(t, {
     config: initialConfig,
@@ -996,9 +1008,8 @@ test("selected stdout quota errors are rejected by default", async (t) => {
 
   const configText = fs.readFileSync(harness.configPath, "utf8");
   const configJson = JSON.parse(configText);
-  // Quota-exceeded models should now be ALLOWED in the final JSONC config
-  // (they're only excluded from the AI Panel analysis)
-  assert.equal(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
+  assert.notEqual(configJson.agents.sisyphus.model, "stdout-quota-prov/model-1");
+  assert.equal(configJson.agents.sisyphus.fallback_models, undefined);
   assert.match(result.stdout, /stdout-quota-prov.*model-1/);
   assert.match(result.stdout, /quota-exceeded/);
 });

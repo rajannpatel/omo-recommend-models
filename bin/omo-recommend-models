@@ -309,8 +309,8 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  ctx.providerExclusionOptions.rateLimited = parsedArgs["exclude-rate-limited"];
-  ctx.providerExclusionOptions.quotaRestricted = parsedArgs["exclude-quota-restricted"];
+  ctx.providerExclusionOptions.rateLimited = true;
+  ctx.providerExclusionOptions.quotaRestricted = true;
   const explicitModels = [parsedArgs.model]
     .flat()
     .filter((model) => typeof model === "string" && model.trim())
@@ -343,20 +343,14 @@ async function main() {
 
   const needPrompt = useAiPanel && explicitModels.length === 0 && !autoYes && !dryRun && !localOnlyFlag;
 
-  const paidProviderPrep = useAiPanel
-    ? preparePaidProviderModels({
-        config,
-        ctx,
-        localOnlyFlag,
-        hasEnoughContextForPanel,
-        filterUsablePanelModels: (refs, cloudLookup) => filterUsablePanelModelsImpl(refs, cloudLookup, ctx),
-      })
-    : {
-        initialCache: null,
-        initialCloudLookup: { byId: {}, sets: {} },
-        paidProbesPromise: Promise.resolve([]),
-        ensureProbesAwaited: async () => {},
-      };
+  const paidProviderPrep = preparePaidProviderModels({
+    config,
+    ctx,
+    localOnlyFlag,
+    hasEnoughContextForPanel,
+    filterUsablePanelModels: (refs, cloudLookup) =>
+      filterUsablePanelModelsImpl(refs, cloudLookup, ctx),
+  });
   const {
     initialCache,
     initialCloudLookup,
@@ -461,10 +455,12 @@ async function main() {
 
   try {
     if (!useAiPanel) {
+      await ensureProbesAwaited();
       aiResult = createRuleBasedRecommendations({
         config,
         cloudLookup,
         excludeModels: parsedArgs["exclude-model"],
+        isProviderAllowed: (provider) => isProviderAvailable(ctx, provider),
       });
     } else {
       const panelSelection = await selectPanelRecommendation({
@@ -479,6 +475,7 @@ async function main() {
             localCtx,
             gpuCtx,
             ollamaCtx,
+            (provider) => isProviderAvailable(ctx, provider),
           ),
         config,
         confirm,
@@ -596,6 +593,7 @@ async function main() {
     removeOrphans: parsedArgs["remove-orphans"],
     excludeFreeFromConfig,
     validatorPath: path.join(__dirname, "omo-validate-config"),
+    isProviderAllowed: (provider) => isProviderAvailable(ctx, provider),
   });
 }
 

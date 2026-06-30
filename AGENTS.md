@@ -1,22 +1,28 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-27
-**Commit:** 29478729cd7e8a97522fa95f061775def7b0ce0f
+**Generated:** 2026-06-29
+**Commit:** 473a6fe
 **Branch:** master
 
 ## OVERVIEW
-Node CLI tooling for recommending OpenCode OMO agent model placements in `oh-my-openagent.jsonc`. Modernized to run as an ES Modules package with dependency management, interactive terminal prompts, and subprocess tracking, fully optimized for execution via `npx`.
+Node ESM CLI tooling for recommending OpenCode OMO agent/category model placements in `oh-my-openagent.jsonc`. The default path is deterministic upstream rule matching; the legacy AI panel remains opt-in through `--ai-panel`.
 
 ## STRUCTURE
 ```
 omo-recommend/
 ├── bin/
-│   ├── omo-recommend-models # main executable CLI and AI panel flow (ESM)
+│   ├── omo-recommend-models # main executable CLI orchestration (ESM)
 │   └── omo-validate-config  # config validation tool (ESM)
 ├── lib/
+│   ├── cli-options.js      # commander flag parsing and defaults
 │   ├── omo-shared.js       # config paths, JSONC parsing, and model lookup helpers
+│   ├── probe-providers.js  # provider availability / quota / rate-limit state
 │   └── recommend/
-│       └── apply.js        # decoupled backup, validation, and write logic
+│       ├── rules-assignment.js          # upstream model-chain matcher
+│       ├── model-requirements.js        # vendored upstream source-of-truth snapshot
+│       ├── recommendation-finalizer.js  # normalize, backfill, deduplicate
+│       ├── apply-recommendations.js     # config mutation and apply pipeline
+│       └── apply.js                     # backup, validation, and write logic
 ├── package.json            # NPM package and dependency definitions
 ├── package-lock.json       # lockfile for dependencies
 └── workshop.yaml           # workshop configurations
@@ -25,10 +31,16 @@ omo-recommend/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| AI panel calls, prompt, consensus, dry-run flow | `bin/omo-recommend-models` | `main()` is at the bottom; uses `mri` for arg parsing and `@clack/prompts` for UI. |
+| CLI startup, dry-run/apply flow | `bin/omo-recommend-models` | `main()` is at the bottom; argument parsing is delegated to `lib/cli-options.js`. |
+| CLI flags and defaults | `lib/cli-options.js` | Uses `commander`; aliases like `--cloud-only` normalize to internal exclude flags. |
+| Rule-chain assignment | `lib/recommend/rules-assignment.js` | Uses `AGENT_MODEL_REQUIREMENTS` and `CATEGORY_MODEL_REQUIREMENTS` from `model-requirements.js`. |
+| Upstream model source snapshot | `lib/recommend/model-requirements.js` | Mirrors `code-yeongyu/oh-my-openagent` `dev` branch model-core requirement files. |
+| Provider quota/rate-limit handling | `lib/probe-providers.js` | Tracks provider state in `RuntimeContext`; final config filtering must honor it. |
 | Config paths and JSONC parsing | `lib/omo-shared.js` | Traverses directories backwards from process.cwd() for `.opencode/oh-my-openagent.jsonc`. |
 | Provider aliases and lookup | `lib/omo-shared.js` | `buildProviderAliases`, `resolveProvider`, `buildRichModelLookup`. |
-| Backup and configuration validation writing | `lib/recommend/apply.js` | Manages backups, validating runs, and rollbacks on validation failures. |
+| Recommendation normalization | `lib/recommend/recommendation-finalizer.js` | Filters unusable refs, fills provider fallbacks, adds fitting local fallback. |
+| Config writes and validation | `lib/recommend/apply.js`, `lib/recommend/apply-recommendations.js` | Manages backups, mutation, validation, and rollback on validation failures. |
+| Integration harness | `test/omo-recommend-models.test.js` | Fakes `opencode`, `ollama`, `codex`, `agy`, and GPU commands. |
 
 ## CONVENTIONS
 - Runtime is Node.js with ES Modules (ESM). All imports must use explicit `.js` extensions.
@@ -36,12 +48,15 @@ omo-recommend/
 - Third-party dependencies are managed via `package.json` (`mri`, `@clack/prompts`, `picocolors`).
 - Subprocess execution must use argument arrays instead of raw shell command strings to prevent shell escaping issues.
 - Non-interactive/non-TTY execution defaults to dry-run mode, printing proposed updates without applying unless `--yes` or `-y` is passed.
+- Built-in upstream model matching follows `packages/model-core/src/agent-model-requirements.ts` and `packages/model-core/src/category-model-requirements.ts` from `code-yeongyu/oh-my-openagent` `dev`.
+- Free OpenCode models are allowed in config by default. Use `--exclude-free` or `--no-free-config` only when the user explicitly wants them removed.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Local models must not go into routing arrays; they belong in `fallback_models` unless the script intentionally sets a local primary for a utility/no-cloud scenario.
 - Do not place multiple local models for the same agent; choose the highest-scored fitting local model.
 - Recommendation order is semantic: first item becomes primary, later items become fallbacks.
 - Free models should not become primary for demanding agents when higher-scored paid/cloud models exist.
+- Quota-exhausted or currently rate-limited providers must not appear in `model`, `routing`, or `fallback_models` once detected.
 - Redundant local models, same-tier duplicates, and unused low-value installed models should be marked for uninstall.
 
 ## COMMANDS
@@ -55,4 +70,3 @@ npm test
 - The test harness is configured in `test/omo-recommend-models.test.js` and runs via `npm test` using Node's built-in `node:test`.
 - `.codegraph` is a local symlink for indexed navigation and is excluded from git.
 - Keep any temporary debug files out of the repo; use `/tmp` or `.git/info/exclude` for local-only artifacts.
-
