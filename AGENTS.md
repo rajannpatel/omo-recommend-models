@@ -52,11 +52,11 @@ omo-recommend/
 - Free OpenCode models are allowed in config by default. Use `--exclude-free` or `--no-free-config` only when the user explicitly wants them removed.
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Local models must not go into routing arrays; they belong in `fallback_models` unless the script intentionally sets a local primary for a utility/no-cloud scenario.
+- Do not write `routing` into `oh-my-openagent.jsonc`; the upstream schema allows `model` and `fallback_models`, not `routing`.
 - Do not place multiple local models for the same agent; choose the highest-scored fitting local model.
 - Recommendation order is semantic: first item becomes primary, later items become fallbacks.
 - Free models should not become primary for demanding agents when higher-scored paid/cloud models exist.
-- Quota-exhausted or currently rate-limited providers must not appear in `model`, `routing`, or `fallback_models` once detected.
+- Quota-exhausted or currently rate-limited providers must not appear in `model` or `fallback_models` once detected.
 - Redundant local models, same-tier duplicates, and unused low-value installed models should be marked for uninstall.
 
 ## COMMANDS

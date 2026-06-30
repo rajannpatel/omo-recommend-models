@@ -1,6 +1,6 @@
 {
   "name": "omo-recommend-models",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Consolidated AI-powered model recommendation CLI for OpenCode OMO agent configurations",
   "type": "module",
   "bin": {
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.7.0",
+    "ajv": "^8.20.0",
     "commander": "^12.1.0",
     "picocolors": "^1.0.1"
   }

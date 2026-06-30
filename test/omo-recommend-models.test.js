@@ -31,9 +31,13 @@ function defaultConfig(overrides = {}) {
   return {
     $schema: "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",
     runtime_fallback: true,
+    git_master: {
+      commit_footer: true,
+      include_co_authored_by: true,
+      git_env_prefix: "GIT_MASTER=1",
+    },
     agents: {
       sisyphus: {
-        model_quality: "high",
         description: "Primary orchestrator and architectural planner",
         ...(overrides.sisyphus || {}),
       },
@@ -891,6 +895,7 @@ test("validator direct CLI supports help, config validation, malformed input, an
   fs.writeFileSync(validConfig, `{
     // comments are allowed
     "$schema": "https://example.invalid/schema.json",
+    "git_master": { "commit_footer": true, "include_co_authored_by": true, "git_env_prefix": "GIT_MASTER=1" },
     "agents": { "sisyphus": { "model": "opencode/big-pickle", } },
     "categories": {}
   }\n`);

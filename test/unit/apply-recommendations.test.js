@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { applyCloudAssignments } from "../../lib/recommend/apply-recommendations.js";
 
-test("applyCloudAssignments filters unconfirmed local and excluded free refs", () => {
+test("applyCloudAssignments filters unconfirmed local and excluded free refs without writing routing", () => {
   const config = {
     agents: {
       sisyphus: {
@@ -38,10 +38,7 @@ test("applyCloudAssignments filters unconfirmed local and excluded free refs", (
 
   assert.equal(total, 1);
   assert.equal(config.agents.sisyphus.model, "old/provider");
-  assert.deepEqual(config.agents.sisyphus.routing, [
-    "local/tinyllama:1.1b",
-    "paid/route",
-  ]);
+  assert.equal("routing" in config.agents.sisyphus, false);
   assert.deepEqual(config.agents.sisyphus.fallback_models, ["paid/fallback"]);
 });
 

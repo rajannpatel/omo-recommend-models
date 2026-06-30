@@ -161,16 +161,12 @@ function showCloudRecommendations(aiResult, config) {
     const newFallbacks = (rec.fallback_models || [])
       .filter((r) => r.provider && r.model)
       .map((r) => `${r.provider}/${r.model}`);
-    const newRouting = (rec.routing || [])
-      .filter((r) => r.provider && r.model)
-      .map((r) => `${r.provider}/${r.model}`);
-
     const modelChanged = (prevModel || null) !== newModel;
     const hasPrevConfig =
       prevModel ||
       (section.fallback_models && section.fallback_models.length > 0);
     const anyChanged =
-      modelChanged || newFallbacks.length > 0 || newRouting.length > 0;
+      modelChanged || newFallbacks.length > 0;
 
     // Skip agents with no current config AND no recommendation — pure noise
     if (!anyChanged && !hasPrevConfig) continue;
@@ -180,8 +176,6 @@ function showCloudRecommendations(aiResult, config) {
     // Bulleted preview block
     console.log(`  \u2022 ${pathPrefix}.${rec.name}`);
     console.log(`    model: ${newModel || ""}`);
-    if (newRouting.length > 0)
-      console.log(`    routing: ${newRouting.join(", ")}`);
     if (newFallbacks.length > 0)
       console.log(`    fallback_models: ${newFallbacks.join(", ")}`);
     console.log();
