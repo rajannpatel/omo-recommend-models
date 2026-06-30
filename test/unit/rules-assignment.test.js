@@ -56,6 +56,34 @@ test("createRuleBasedRecommendations selects the first available upstream-chain 
   assert.equal(deep.model.variant, "medium");
 });
 
+test("createRuleBasedRecommendations keeps multiple free fallbacks from opencode", () => {
+  const config = {
+    agents: {
+      sisyphus: { description: "orchestrator" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "opencode-go": ["kimi-k2.6"],
+      openai: ["gpt-5.5"],
+      opencode: ["big-pickle", "north-mini-code-free"],
+    }),
+  });
+
+  const sisyphus = result.cloudRecommendations[0];
+  assert.deepEqual(
+    sisyphus.fallback_models.map((ref) => `${ref.provider}/${ref.model}`),
+    [
+      "openai/gpt-5.5",
+      "opencode/big-pickle",
+      "opencode/north-mini-code-free",
+    ],
+  );
+});
+
 test("createRuleBasedRecommendations strips manually excluded providers and models", () => {
   const config = {
     agents: {

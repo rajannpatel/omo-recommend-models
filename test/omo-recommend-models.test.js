@@ -539,7 +539,10 @@ test("default recommender uses upstream rule chain without AI Panel", async (t) 
     providerCache: {
       models: {
         "opencode-go": [{ id: "kimi-k2.6", family: "kimi", context_length: 200000 }],
-        opencode: [{ id: "big-pickle", family: "glm", context_length: 200000 }],
+        opencode: [
+          { id: "big-pickle", family: "glm", context_length: 200000 },
+          { id: "north-mini-code-free", family: "north", context_length: 32000 },
+        ],
       },
     },
   });
@@ -550,6 +553,10 @@ test("default recommender uses upstream rule chain without AI Panel", async (t) 
   assert.match(result.stdout, /Rule matcher: 2 provider\(s\)/);
   assert.match(result.stdout, /AI Analysis \(via rules\(model-core\)\)/);
   assert.match(result.stdout, /model: opencode-go\/kimi-k2\.6/);
+  assert.match(
+    result.stdout,
+    /fallback_models: opencode\/big-pickle, opencode\/north-mini-code-free/,
+  );
   assert.doesNotMatch(result.stdout, /This run would query:/);
 });
 
