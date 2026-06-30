@@ -40,6 +40,7 @@ import {
   selectedPanelRequiresOpencode,
   defaultPanelModels as defaultPanelModelsImpl,
   createProgress,
+  formatAiAnalysis,
 } from "../lib/display-utils.js";
 import { isProviderAvailable } from "../lib/probe-providers.js";
 import {
@@ -369,12 +370,12 @@ async function main() {
     ollama,
     allLocalModels,
     localModelNames,
-  } = discoverLocalEnvironment({
+  } = await discoverLocalEnvironment({
     cloudOnlyFlag,
     detectGPU,
     detectOllama: () => detectOllama(commandExists),
     discoverModels: (forceRefresh, progress) =>
-      discoverModelsFromRegistry(forceRefresh, progress, subprocess.fetchUrl.bind(subprocess)),
+      discoverModelsFromRegistry(forceRefresh, progress, subprocess.fetchUrlAsync.bind(subprocess)),
   });
 
   const skipCloud = localOnlyFlag;
@@ -567,7 +568,11 @@ async function main() {
   }
 
   console.log(`\n\uD83D\uDCCA AI Analysis (via ${aiResult.recommender}):`);
-  console.log(`   ${aiResult.analysis}\n`);
+  const analysisLines = formatAiAnalysis(aiResult.analysis).split("\n");
+  for (const line of analysisLines) {
+    console.log(`   ${line}`);
+  }
+  console.log();
 
   // Display cloud recommendations
   const cloudChanges = showCloudRecommendations(aiResult, config);

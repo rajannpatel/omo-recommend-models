@@ -15,8 +15,8 @@ sdks:
     channel: latest/stable
   - name: codex
     channel: latest/stable
-  # - name: ollama
-  #   channel: cuda/stable
+  - name: ollama
+    channel: cuda/stable
   - name: node
     channel: 24
   # - name: system

@@ -1661,7 +1661,7 @@ test("configured Codex CLI panel usage includes detected agy and is disclosed ex
 test("slow CLI panel agents report the active evaluation before completion", async (t) => {
   const harness = createHarness(t, {
     agy: true,
-    agyOptions: { callDelayMs: 1000 },
+    agyOptions: { callDelayMs: 3000 },
     config: defaultConfig({
       root: {
         omo: {
@@ -1675,7 +1675,7 @@ test("slow CLI panel agents report the active evaluation before completion", asy
     harness.env,
     "",
     ["--dry-run", "--cloud-only", "--exclude-codex", "--interactive", "--ai-panel"],
-    500,
+    1500,
   );
 
   assert.equal(observed.exited, false, "fake agy delay should keep the CLI running long enough to observe progress");
