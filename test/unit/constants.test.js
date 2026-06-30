@@ -16,8 +16,6 @@ import {
   modelListEquals,
   isSubsetList,
   KNOWN_MODELS,
-  MODEL_SCORES,
-  BASE_VRAM,
   loadPanelCache,
   savePanelCache,
 } from "../../lib/constants.js";
@@ -103,34 +101,10 @@ test("KNOWN_MODELS is an array of objects with name and tags", () => {
   }
 });
 
-test("MODEL_SCORES contains expected keys", () => {
-  assert.ok("deepseek-coder-v2" in MODEL_SCORES);
-  assert.ok("qwen2.5-coder" in MODEL_SCORES);
-  assert.ok("llama3.1" in MODEL_SCORES);
-  assert.ok(typeof MODEL_SCORES["deepseek-coder-v2"] === "number");
-});
-
-test("BASE_VRAM contains expected keys", () => {
-  assert.ok("llama3.1" in BASE_VRAM);
-  assert.ok("mixtral" in BASE_VRAM);
-  assert.ok(typeof BASE_VRAM["llama3.1"] === "number");
-});
-
-test("BASE_VRAM and MODEL_SCORES have the same keys", () => {
-  const scoreKeys = Object.keys(MODEL_SCORES).sort();
-  const vramKeys = Object.keys(BASE_VRAM).sort();
-  assert.deepEqual(scoreKeys, vramKeys);
-});
-
 test("savePanelCache and loadPanelCache round-trip", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "panel-cache-test-"));
-  const originalCacheFile = PANEL_CACHE_FILE;
 
   try {
-    // Override PANEL_CACHE_FILE path via env or direct write
-    const testPath = path.join(tmpDir, "panel-cache.json");
-    const originalPath = PANEL_CACHE_FILE;
-
     // We test savePanelCache writes to its hardcoded path — we can't easily
     // override it. Instead test loadPanelCache returns null for missing cache.
     const result = loadPanelCache();

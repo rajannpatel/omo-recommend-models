@@ -73,7 +73,6 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
 | `--rebalance` | `false` | Run in algorithmic rebalance mode. Skips the AI panel entirely and restructures existing `model` and `fallback_models` assignments around score-based tier chains. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
-| `--dangerously-skip-permissions` | `false` | Skip validation permission checks during config writing. Use with caution. |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
 | `--model <ref>` | — | Specify an explicit AI panel model reference. Repeatable: `--model prov/model1 --model prov/model2`. |
 

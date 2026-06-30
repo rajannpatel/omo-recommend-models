@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import {
   createRuleBasedRecommendations,
-  refsFromManualExclusions,
 } from "../../lib/recommend/rules-assignment.js";
 
 function lookup(models) {
@@ -103,10 +102,6 @@ test("createRuleBasedRecommendations strips manually excluded providers and mode
     excludeModels: ["openai", "opencode-go/kimi-k2.6"],
   });
 
-  assert.deepEqual(refsFromManualExclusions(["openai", "opencode-go/kimi-k2.6"]), [
-    "openai",
-    "opencode-go/kimi-k2.6",
-  ]);
   assert.equal(result.cloudRecommendations.length, 2);
   const sisyphus = result.cloudRecommendations.find((rec) => rec.name === "sisyphus");
   assert.equal(sisyphus.model.provider, "opencode");
