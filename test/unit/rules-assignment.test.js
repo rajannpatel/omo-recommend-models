@@ -114,7 +114,7 @@ test("createRuleBasedRecommendations strips manually excluded providers and mode
   const hephaestus = result.cloudRecommendations.find((rec) => rec.name === "hephaestus");
   assert.equal(hephaestus.model.provider, "opencode");
   assert.equal(hephaestus.model.model, "big-pickle");
-  assert.match(result.analysis, /hephaestus \(tried: openai\/gpt-5.5\)/);
+  assert.match(result.analysis, /hephaestus \(tried: openai\/gpt-5.5/);
 });
 
 test("createRuleBasedRecommendations excludes unavailable providers everywhere", () => {

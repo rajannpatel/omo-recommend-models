@@ -414,6 +414,8 @@ async function main() {
   const cliOptions = {
     excludeCodex: parsedArgs["exclude-codex"],
     excludeAgy: parsedArgs["exclude-agy"],
+    excludeOpencode: parsedArgs["exclude-opencode"],
+    parallelPanel: parsedArgs["parallel-panel"],
     excludeFree: excludeFreeFromConfig || parsedArgs["exclude-free"],
     freePanel: parsedArgs["free-panel"],
     noFreePanel: parsedArgs._noFreePanelExplicit,

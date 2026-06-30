@@ -491,7 +491,7 @@ test("missing opencode exits early with actionable dependency error", async (t) 
 test("AI panel runs recommendation models in pure text mode", async (t) => {
   const harness = createHarness(t);
 
-  const result = await runCli(harness.env, "\n");
+  const result = await runCli(harness.env, "\n", ["--exclude-opencode"]);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -744,7 +744,7 @@ test("panel picker label and recommendation preview uses bulleted format", async
     },
   });
 
-  const result = await runCli(harness.env, ["\n", "\n", "n\n"], ["--cloud-only"]);
+  const result = await runCli(harness.env, ["\n", "\n", "n\n"], ["--cloud-only", "--exclude-opencode"]);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1568,7 +1568,7 @@ test("AI Panel default selection diversifies capable paid models and excludes sm
     },
   });
 
-  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only", "--parallel-panel"], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1608,7 +1608,7 @@ test("detected codex and agy occupy preferred AI Panel slots and use low-tier CL
     },
   });
 
-  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only", "--exclude-opencode", "--parallel-panel"], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1649,13 +1649,13 @@ test("configured Codex CLI panel usage includes detected agy and is disclosed ex
     }),
   });
 
-  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only", "--exclude-opencode", "--parallel-panel"], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Configured CLI panel agents: cli\/codex \(Codex CLI\), cli\/agy/);
   assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
-  assert.match(result.stdout, /AI Analysis \(via panel\(codex\+agy\)\)/);
+  assert.match(result.stdout, /AI Analysis \(via panel\(codex\+agy\)/);
 });
 
 test("slow CLI panel agents report the active evaluation before completion", async (t) => {
@@ -1710,7 +1710,7 @@ test("invalid CLI probe output is excluded from the AI Panel before voting", asy
     },
   });
 
-  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only"], 12000);
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only", "--exclude-opencode", "--parallel-panel"], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1735,16 +1735,20 @@ test("exclude CLI agent flags and print transparency logs", async (t) => {
     "--cloud-only",
     "--exclude-codex",
     "--exclude-agy",
+    "--exclude-opencode",
   ], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /AI CLI agent cli\/codex excluded via --exclude-codex/);
   assert.match(result.stdout, /AI CLI agent cli\/agy excluded via --exclude-agy/);
+  assert.match(result.stdout, /AI CLI agent cli\/opencode excluded via --exclude-opencode/);
   assert.doesNotMatch(result.stdout, /CLI agents: codex/);
   assert.doesNotMatch(result.stdout, /CLI agents: agy/);
+  assert.doesNotMatch(result.stdout, /CLI agents: opencode/);
   assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
   assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/agy:/);
+  assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/opencode:/);
 
   const cliLog = fs.existsSync(harness.env.OMO_FAKE_CLI_LOG)
     ? fs.readFileSync(harness.env.OMO_FAKE_CLI_LOG, "utf8")
