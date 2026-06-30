@@ -57,6 +57,7 @@ import {
 } from "../lib/recommend/panel-candidates.js";
 import { discoverModels as discoverModelsFromRegistry } from "../lib/recommend/ollama-registry.js";
 import { detectGPU, detectOllama } from "../lib/recommend/hardware-detection.js";
+import { resolveInstallDecisions } from "../lib/apply-local.js";
 import {
   discoverCliModels as discoverCliModelsImpl,
   includeDetectedCliPanelModels as includeDetectedCliPanelModelsImpl,
@@ -132,7 +133,13 @@ function commandExists(binary) {
 // Display functions
 // =========================================================================
 
-function showCloudRecommendations(aiResult, config) {
+function isConfirmedRecommendationRef(ref, confirmedModels) {
+  if (!confirmedModels || !ref) return true;
+  if (ref.provider !== LOCAL_PROVIDER && ref.provider !== "ollama") return true;
+  return confirmedModels.has(normalizeLocalModelName(ref.model));
+}
+
+function showCloudRecommendations(aiResult, config, confirmedModels = null) {
   if (
     !aiResult.cloudRecommendations ||
     aiResult.cloudRecommendations.length === 0
@@ -157,12 +164,17 @@ function showCloudRecommendations(aiResult, config) {
     }
 
     // New recommendations (already normalized to rec.model / rec.fallback_models)
+    const recommendedModelAllowed = isConfirmedRecommendationRef(
+      rec.model,
+      confirmedModels,
+    );
     const newModel =
-      rec.model && rec.model.provider && rec.model.model
+      recommendedModelAllowed && rec.model && rec.model.provider && rec.model.model
         ? `${rec.model.provider}/${rec.model.model}`
         : (prevModelAvailable ? prevModel : null);
     const newFallbacks = (rec.fallback_models || [])
       .filter((r) => r.provider && r.model)
+      .filter((r) => isConfirmedRecommendationRef(r, confirmedModels))
       .map((r) => `${r.provider}/${r.model}`);
     const modelChanged = (prevModel || null) !== newModel;
     const hasPrevConfig =
@@ -209,27 +221,34 @@ function showLocalWarnings(localRecommendationContext) {
   for (const warning of warnings) console.log(`  • ${warning}`);
 }
 
-function showLocalDecisions(aiResult, allLocalModels, ollama, localRecommendationContext = null) {
+function showLocalPlacements(aiResult, confirmedModels = null) {
   if (!aiResult.localModels) return;
-  const { decisions, placements } = aiResult.localModels;
+  const placements = aiResult.localModels.placements || [];
+  const visiblePlacements = confirmedModels
+    ? placements.filter((p) => confirmedModels.has(normalizeLocalModelName(p.modelName)))
+    : placements;
+  if (visiblePlacements.length === 0) return [];
+  console.log(
+    `\n── Local fallback entries to write (${visiblePlacements.length}) ────────`,
+  );
+  for (const p of visiblePlacements) {
+    const target = p.role === "primary" ? "model" : "fallback_models";
+    const action = p.role === "primary" ? "set" : "add";
+    console.log(`  • ${p.agentName}: ${action} ${p.modelName} to ${target}`);
+    if (p.justification) console.log(`    Why: ${p.justification}`);
+  }
+  return visiblePlacements;
+}
+
+function showLocalModelDecisions(aiResult, allLocalModels, ollama, localRecommendationContext = null) {
+  if (!aiResult.localModels) return;
+  const { decisions } = aiResult.localModels;
 
   if (decisions && decisions.length > 0) {
     const installs = decisions.filter((d) => d.action === "install");
     const keeps = decisions.filter((d) => d.action === "keep");
     const uninstalls = decisions.filter((d) => d.action === "uninstall");
     const skips = decisions.filter((d) => d.action === "skip");
-
-    if (placements && placements.length > 0) {
-      console.log(
-        `\n── Local fallback entries to write (${placements.length}) ────────`,
-      );
-      for (const p of placements) {
-        const target = p.role === "primary" ? "model" : "fallback_models";
-        const action = p.role === "primary" ? "set" : "add";
-        console.log(`  • ${p.agentName}: ${action} ${p.modelName} to ${target}`);
-        if (p.justification) console.log(`    Why: ${p.justification}`);
-      }
-    }
 
     if (installs.length > 0) {
       console.log(
@@ -271,10 +290,6 @@ function showLocalDecisions(aiResult, allLocalModels, ollama, localRecommendatio
     }
   }
 }
-
-
-
-
 
 // =========================================================================
 // Apply functions
@@ -575,27 +590,33 @@ async function main() {
   }
   console.log();
 
-  // Display cloud recommendations
-  const cloudChanges = showCloudRecommendations(aiResult, config);
-
-  // Display local decisions (always show if they exist, regardless of placements)
   if (aiResult.localModels) {
-    showLocalDecisions(aiResult, allLocalModels, ollama, localRecommendationContext);
+    showLocalModelDecisions(aiResult, allLocalModels, ollama, localRecommendationContext);
     showLocalWarnings(localRecommendationContext);
   }
 
+  const confirmedModels =
+    parsedArgs.apply && !dryRun
+      ? await resolveInstallDecisions({
+          decisions: aiResult.localModels?.decisions,
+          ollama,
+          autoYes,
+          noInstall: !parsedArgs.install,
+        })
+      : null;
+
+  console.log("\n── JSONC changes to apply ────────────────────────");
+  const cloudChanges = showCloudRecommendations(aiResult, config, confirmedModels);
+  const localPlacements = showLocalPlacements(aiResult, confirmedModels);
+
   const hasLocalChanges =
     aiResult.localModels &&
-    ((aiResult.localModels.placements &&
-      aiResult.localModels.placements.length > 0) ||
-      (aiResult.localModels.decisions &&
-        aiResult.localModels.decisions.some(
-          (d) => d.action === "install" || d.action === "uninstall",
-        )));
+    localPlacements &&
+    localPlacements.length > 0;
   const hasChanges = cloudChanges.length > 0 || hasLocalChanges;
 
   if (!hasChanges) {
-    console.log("\u2705 No changes needed.\n");
+    console.log("\u2705 No JSONC changes needed.\n");
     return;
   }
 
@@ -610,7 +631,7 @@ async function main() {
   }
 
   if (!autoYes) {
-    const ok = await confirm("Apply all recommendations above? (y/N) ");
+    const ok = await confirm("Apply these JSONC changes? (y/N) ");
     if (!ok) {
       console.log("  Skipped.\n");
       return;
@@ -629,6 +650,7 @@ async function main() {
     excludeFreeFromConfig,
     validatorPath: path.join(__dirname, "omo-validate-config"),
     isProviderAllowed: (provider) => isProviderAvailable(ctx, provider),
+    confirmedModels,
   });
 }
 

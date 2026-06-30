@@ -891,6 +891,45 @@ test("default rule matcher appends dynamic installed local fallback last", async
   assert.equal(written.agents.sisyphus.fallback_models.at(-1), "local/deepseek-r1:8b");
 });
 
+test("interactive install choice happens before JSONC confirmation and filters skipped locals", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 32000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
+    gpu: { name: "Rule GPU", vramGb: 24 },
+    localCatalog: [
+      { name: "deepseek-r1:8b", size: "6.3 GB", vram: 6.3, score: 10, baseModel: "deepseek-r1", tag: "8b" },
+    ],
+    ollamaModels: [],
+    validator: { code: 0 },
+  });
+
+  const result = await runCli(harness.env, ["3\n", "y\n"], ["--rules-default"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Install recommended local models before writing JSONC/);
+  assert.match(result.stdout, /1\) Yes to all/);
+  assert.match(result.stdout, /2\) Y\/N per model/);
+  assert.match(result.stdout, /3\) No to all/);
+  const installPrompt = result.stdout.indexOf("Install recommended local models before writing JSONC");
+  const preview = result.stdout.indexOf("JSONC changes to apply");
+  const applyPrompt = result.stdout.indexOf("Apply these JSONC changes? (y/N)");
+  assert.ok(installPrompt >= 0 && preview > installPrompt && applyPrompt > preview);
+  const finalPreview = result.stdout.slice(preview, applyPrompt);
+  assert.doesNotMatch(finalPreview, /local\/deepseek-r1:8b/);
+  assert.doesNotMatch(result.stdout.slice(applyPrompt), /Install deepseek-r1:8b/);
+  const written = readConfig(harness.configPath);
+  assert.equal(written.agents.sisyphus.model, "opencode/big-pickle");
+  assert.doesNotMatch(JSON.stringify(written.agents.sisyphus), /local\/deepseek-r1:8b/);
+});
+
 test("installed local tie-break writes canonical local fallback last without routing", async (t) => {
   const harness = createHarness(t, {
     config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
