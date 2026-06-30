@@ -9,7 +9,7 @@ A CLI utility for OpenCode + OmO that profiles your hardware and generates a bas
 
 ## Quick Start
 
-Run the utility in your project directory to evaluate your hardware and update your model registry:
+Run the utility in your project directory to evaluate your available providers and preview the default deterministic rule-based recommendation:
 
 ```
 $ npx omo-recommend-models --cloud-only --yes
@@ -21,33 +21,20 @@ $ npx omo-recommend-models --cloud-only --yes
 ◇  Discovering local model catalog: skipped by --cloud-only
 │
 ◇  Loading cloud provider cache: 5 provider(s)
-  ✓ Model picture: 5 cloud provider(s), 0 installed local model(s)
+✓ Rule matcher: 5 provider(s) loaded from OpenCode model cache
 
-This run would query:
-  1. opencode: nemotron-3-ultra-free
-               mimo-v2.5-free
-               deepseek-v4-flash-free
-               big-pickle
-               north-mini-code-free
+📊 AI Analysis (via rules(model-core)):
+   Assigned from upstream oh-my-openagent model fallback rules after loading provider availability.
 
-== AI Panel: 21 agents, 5 panel models ==
-   Models:
-   • opencode/nemotron-3-ultra-free:   19/21 successful responses
-   • opencode/mimo-v2.5-free:          21/21 successful responses
-   • opencode/deepseek-v4-flash-free:  21/21 successful responses
-   • opencode/big-pickle:              21/21 successful responses
-   • opencode/north-mini-code-free:    13/21 successful responses
-evaluating -
-   • tasks:                           105/105
-   • agents:                           21/21
+  • agents.sisyphus
+    model: openai/gpt-5.5
+    fallback_models: opencode/big-pickle, opencode/nemotron-3-ultra-free
 
-
-📊 AI Analysis (via panel(nemotron-3-ultra-free+mimo-v2.5-free+deepseek-v4-flash-free+big-pickle+north-mini-code-free)):
-   Per-agent consensus across 5 panel models for 21 agent(s)
+   → Apply: omo-recommend-models
 
 ```
 
-   [ [complete output](./output.md) ]
+Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel survey instead of the default rule matcher.
 
 ---
 
@@ -135,15 +122,15 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
 
 ## 🎯 What this actually does
 
-* **Hardware profiling (The Best Feature)** 
+* **Computed local fit recommendations** 
 
-    Detects your GPU architecture and available VRAM to shortlist local models (GGUFs, Ollama, vLLM) that will actually fit on your machine without OOM (Out of Memory) errors.
-* **Static cost & context comparisons** 
+    Detects your GPU and Ollama catalog, estimates each local model's weight plus KV-cache cost, and recommends only models that fit the active role and the available VRAM budget. Local recommendations are computed from metadata and hardware facts, not a hand-curated static table.
+* **Cloud cost, context, and availability comparisons** 
 
-    Provides a quick, point-in-time stack-rank of models from AI cloud providers you have authenticated in opencode (via `opencode auth login`), so decision fatigue around ordering models from best to worst for each OmO agent and purpose is completed with AI-driven reasoning.
+    Provides a quick, point-in-time stack-rank of models from AI cloud providers you have authenticated in opencode (via `opencode auth login`), then removes providers that are currently rate-limited, quota-blocked, or otherwise unavailable.
 * **Initial template generation** 
 
-    Spits out a baseline `oh-my-openagent.jsonc` file with valid syntax, saving you from manually typing out provider endpoints on day one.
+    Writes a baseline `oh-my-openagent.jsonc` file with valid syntax, canonical `provider/model` references, cloud fallbacks, and local fallbacks when they are confirmed installed or explicitly installed during the run.
 
 ---
 
@@ -184,7 +171,9 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
     The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for the AI panel.
 * **Local inventory**
 
-    If local discovery is enabled, the tool checks GPU/VRAM and Ollama, then only presents local models that fit the detected hardware. Local models are never placed in `routing`; they are used as primaries only when the recommendation explicitly chooses a local-first role, or as `fallback_models` for offline/quota-limited operation.
+    If local discovery is enabled, the tool checks GPU/VRAM and Ollama, normalizes installed and cached Ollama models into candidate cards, infers each agent/category requirement, and ranks candidates by specialty, context support, estimated memory, parameter count, OpenRouter popularity when available, and installed-state tie-breaks. The fit budget is `gpu.vramGb * 0.90`; the active dynamic path does not subtract the old fixed 1.5 GB margin.
+
+    The local memory estimate is approximate: model weight comes from Ollama manifest layer sizes when available, then catalog metadata, and KV cache is estimated from target context and parameter count. Candidates with unsafe missing metadata are rejected instead of guessed. When no same-specialty local model fits, the CLI prints a hardware deficit warning with practical next steps such as lowering context, installing a smaller model, using `--cloud-only`, or upgrading VRAM.
 * **Rate-limit and quota filtering**
 
     Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured paid providers before deterministic rule matching or AI panel selection, removes blocked providers from primary, routing, and `fallback_models`, and sanitizes cached/panel recommendations before writing JSONC.
@@ -216,7 +205,9 @@ CLOUD (<count>):
 <provider/model score>
 
 LOCAL (<count> fit VRAM):
-<model name, VRAM, score, installed status>
+<model name, total VRAM, weight, KV cache, score, installed/missing status>
+
+LOCAL_WARNING: <hardware deficit warning when no same-specialty local model fits>
 
 FIELDS: model=primary routing=delegation_pool fallback_models=retry_pool
 RULES:
@@ -239,14 +230,15 @@ The real prompt also includes a few concrete examples so the panel models keep `
 
 ## How `fallback_models` are determined
 
-The AI panel votes independently for each agent/category. The CLI then:
+By default, the CLI starts from upstream `rules(model-core)` fallback chains. With `--ai-panel`, the panel votes independently for each agent/category. In both modes, the CLI then:
 
-1. Picks the primary `model` by majority vote when possible, or by plurality when no model has a majority.
-2. Adds `routing` entries that received majority support.
-3. Adds `fallback_models` entries that received majority support.
+1. Picks or preserves the primary `model` from the rule chain or AI Panel consensus.
+2. Adds cloud `routing` entries from rule chains or panel consensus.
+3. Adds cloud `fallback_models` entries from rule chains or panel consensus.
 4. Fills in missing cloud providers with each provider's highest-scored model, so a config is not dominated by one provider.
-5. Adds the best fitting local model as a fallback when local discovery finds a useful installed model.
-6. Deduplicates `fallback_models` and removes anything that duplicates the primary model.
-7. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
+5. Adds at most one computed local fallback for each entry when local discovery finds a fitting candidate for that entry's role.
+6. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
+7. Deduplicates `fallback_models`, removes anything that duplicates the primary model, and orders local fallbacks last after cloud fallbacks.
+8. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
 
 In `--rebalance` mode, the AI panel is skipped. The CLI instead builds tier chains directly from model scores and restructures existing `model` plus `fallback_models` assignments around those score tiers.

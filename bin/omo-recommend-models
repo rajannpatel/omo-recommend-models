@@ -25,12 +25,14 @@ import {
   loadConfig,
   loadProviderModels,
   buildRichModelLookup,
+  normalizeLocalModelName,
 } from "../lib/omo-shared.js";
 import { LOCAL_PROVIDER } from "../lib/constants.js";
 import { applyRecommendations } from "../lib/recommend/apply-recommendations.js";
 import { selectPanelRecommendation } from "../lib/recommend/panel-selection.js";
 import { preparePaidProviderModels } from "../lib/recommend/paid-provider-prep.js";
 import { discoverLocalEnvironment } from "../lib/recommend/local-environment.js";
+import { buildLocalRecommendationContext } from "../lib/recommend/local-recommendation-context.js";
 import { completeAiRecommendations } from "../lib/recommend/recommendation-finalizer.js";
 import { createRuleBasedRecommendations } from "../lib/recommend/rules-assignment.js";
 import { runPanelAndSelect } from "../lib/recommend/panel-core.js";
@@ -183,7 +185,30 @@ function showCloudRecommendations(aiResult, config) {
   return changes;
 }
 
-function showLocalDecisions(aiResult, allLocalModels, ollama) {
+function localDecisionDetails(name, allLocalModels, localRecommendationContext) {
+  const normalizedName = normalizeLocalModelName(name);
+  const contextCard = (localRecommendationContext?.candidateCards || []).find(
+    (card) => normalizeLocalModelName(card?.name) === normalizedName,
+  );
+  if (contextCard) {
+    return `  (total ${contextCard.totalVramGb ?? "?"} GB VRAM, weight ${contextCard.weightGb ?? "?"} GB, KV ${contextCard.kvCacheGb ?? "?"} GB, score ${contextCard.score ?? 0}, ${contextCard.installed ? "installed" : "missing"})`;
+  }
+  const catalogModel = allLocalModels.find(
+    (model) => normalizeLocalModelName(model.name) === normalizedName,
+  );
+  return catalogModel
+    ? `  (${catalogModel.size}, ${catalogModel.vram} GB VRAM, score ${catalogModel.score})`
+    : "";
+}
+
+function showLocalWarnings(localRecommendationContext) {
+  const warnings = localRecommendationContext?.warnings?.aggregate || [];
+  if (warnings.length === 0) return;
+  console.log(`\n── Local recommendation warnings (${warnings.length}) ───────────`);
+  for (const warning of warnings) console.log(`  • ${warning}`);
+}
+
+function showLocalDecisions(aiResult, allLocalModels, ollama, localRecommendationContext = null) {
   if (!aiResult.localModels) return;
   const { decisions, placements } = aiResult.localModels;
 
@@ -193,14 +218,13 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
     const uninstalls = decisions.filter((d) => d.action === "uninstall");
     const skips = decisions.filter((d) => d.action === "skip");
 
-    // Placements first
     if (placements && placements.length > 0) {
       console.log(
         `\n── AI: Local config placements (${placements.length}) ────────`,
       );
       for (const p of placements) {
         console.log(
-          `  \u2022 ${p.modelName} \u2192 ${p.agentName} (${p.role})`,
+          `  • ${p.modelName} → ${p.agentName} (${p.role})`,
         );
         if (p.justification)
           console.log(`    Justification: ${p.justification}`);
@@ -212,22 +236,16 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
         `\n── AI: Install (${installs.length}) ────────────────────────`,
       );
       for (const d of installs) {
-        const m = allLocalModels.find((x) => x.name === d.name);
-        const extra = m
-          ? `  (${m.size}, ${m.vram} GB VRAM, score ${m.score})`
-          : "";
-        console.log(`  \u2022 ${d.name}${extra}`);
+        const extra = localDecisionDetails(d.name, allLocalModels, localRecommendationContext);
+        console.log(`  • ${d.name}${extra}`);
         console.log(`    ${d.rationale}`);
       }
     }
     if (keeps.length > 0) {
       console.log(`\n── AI: Keep (${keeps.length}) ──────────────────────────`);
       for (const d of keeps) {
-        const m = allLocalModels.find((x) => x.name === d.name);
-        const extra = m
-          ? `  (${m.size}, ${m.vram} GB VRAM, score ${m.score})`
-          : "";
-        console.log(`  \u2022 ${d.name}${extra}`);
+        const extra = localDecisionDetails(d.name, allLocalModels, localRecommendationContext);
+        console.log(`  • ${d.name}${extra}`);
         console.log(`    ${d.rationale}`);
       }
     }
@@ -236,12 +254,9 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
         `\n── AI: Uninstall (${uninstalls.length}) ────────────────────`,
       );
       for (const d of uninstalls) {
-        const m = allLocalModels.find((x) => x.name === d.name);
-        const extra = m
-          ? `  (${m.size}, ${m.vram} GB VRAM, score ${m.score})`
-          : "";
+        const extra = localDecisionDetails(d.name, allLocalModels, localRecommendationContext);
         const isInstalled = ollama.models.some((x) => x.name === d.name);
-        console.log(`  \u2022 ${d.name}${extra}`);
+        console.log(`  • ${d.name}${extra}`);
         console.log(`    ${d.rationale}`);
         if (!isInstalled) console.log(`    (not installed, nothing to remove)`);
       }
@@ -249,11 +264,8 @@ function showLocalDecisions(aiResult, allLocalModels, ollama) {
     if (skips.length > 0) {
       console.log(`\n── AI: Skip (${skips.length}) ──────────────────────────`);
       for (const d of skips) {
-        const m = allLocalModels.find((x) => x.name === d.name);
-        const extra = m
-          ? `  (${m.size}, ${m.vram} GB VRAM, score ${m.score})`
-          : "";
-        console.log(`  \u2022 ${d.name}${extra}`);
+        const extra = localDecisionDetails(d.name, allLocalModels, localRecommendationContext);
+        console.log(`  • ${d.name}${extra}`);
         console.log(`    ${d.rationale}`);
       }
     }
@@ -416,6 +428,17 @@ async function main() {
     });
   }
 
+  const localRecommendationContext = buildLocalRecommendationContext({
+    config,
+    gpu,
+    ollama,
+    allLocalModels,
+    cloudLookup,
+    cloudOnlyFlag,
+    localOnlyFlag,
+  });
+  ctx.localRecommendationContext = localRecommendationContext;
+
   const cloudProviderCount = Object.entries(cloudLookup.byId || {}).filter(
     ([provider, modelMap]) =>
       provider !== LOCAL_PROVIDER && modelMap && modelMap.size > 0,
@@ -450,12 +473,21 @@ async function main() {
   try {
     if (!useAiPanel) {
       await ensureProbesAwaited();
-      aiResult = createRuleBasedRecommendations({
+      aiResult = completeAiRecommendations(
+        createRuleBasedRecommendations({
         config,
         cloudLookup,
         excludeModels: parsedArgs["exclude-model"],
         isProviderAllowed: (provider) => isProviderAvailable(ctx, provider),
-      });
+        }),
+        config,
+        cloudLookup,
+        localCtx,
+        gpuCtx,
+        ollamaCtx,
+        (provider) => isProviderAvailable(ctx, provider),
+        localRecommendationContext,
+      );
     } else {
       const panelSelection = await selectPanelRecommendation({
         autoYes,
@@ -470,6 +502,7 @@ async function main() {
             gpuCtx,
             ollamaCtx,
             (provider) => isProviderAvailable(ctx, provider),
+            localRecommendationContext,
           ),
         config,
         confirm,
@@ -489,6 +522,7 @@ async function main() {
         },
         initialExcludeFreeFromConfig: excludeFreeFromConfig,
         localCtx,
+        localRecommendationContext,
         localOnlyFlag,
         parsedArgs,
         printCliPanelDisclosure,
@@ -540,7 +574,8 @@ async function main() {
 
   // Display local decisions (always show if they exist, regardless of placements)
   if (aiResult.localModels) {
-    showLocalDecisions(aiResult, allLocalModels, ollama);
+    showLocalDecisions(aiResult, allLocalModels, ollama, localRecommendationContext);
+    showLocalWarnings(localRecommendationContext);
   }
 
   const hasLocalChanges =

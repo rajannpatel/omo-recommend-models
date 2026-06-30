@@ -808,6 +808,139 @@ test("canonical local output is local slash refs and local models never enter ro
   assert.doesNotMatch(fs.readFileSync(harness.configPath, "utf8"), /ollama\/tinyllama:1\.1b/);
 });
 
+test("dynamic local selection uses ninety percent VRAM budget and no-install skips missing picks", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 32000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
+    gpu: { name: "Boundary GPU", vramGb: 10 },
+    localCatalog: [
+      { name: "deepseek-r1:7b", size: "6.2 GB", vram: 6.2, score: 999, baseModel: "deepseek-r1", tag: "7b" },
+      { name: "deepseek-r1:8b", size: "6.3 GB", vram: 6.3, score: 1, baseModel: "deepseek-r1", tag: "8b" },
+    ],
+    ollamaModels: [{ name: "deepseek-r1:7b", size: "6.2GB" }],
+    validator: { code: 0 },
+    aiResponse: {
+      analysis: "dynamic local budget",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle", reason: "cloud primary" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(
+    harness.env,
+    "",
+    ["-y", "--no-install", "--ai-panel", "--model", "opencode/big-pickle"],
+  );
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /AI: Install[\s\S]*deepseek-r1:8b/);
+  assert.match(result.stdout, /skipped installation of deepseek-r1:8b via --no-install/);
+  assert.doesNotMatch(result.stdout, /skipped installation of deepseek-r1:7b/);
+  const written = readConfig(harness.configPath);
+  assert.equal(written.agents.sisyphus.model, "opencode/big-pickle");
+  assert.equal(written.agents.sisyphus.fallback_models, undefined);
+});
+
+test("default rule matcher appends dynamic installed local fallback last", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 32000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
+    gpu: { name: "Rule GPU", vramGb: 24 },
+    localCatalog: [
+      { name: "deepseek-r1:8b", size: "6.3 GB", vram: 6.3, score: 10, baseModel: "deepseek-r1", tag: "8b" },
+    ],
+    ollamaModels: [{ name: "deepseek-r1:8b", size: "6.3GB" }],
+    validator: { code: 0 },
+  });
+
+  const result = await runCli(harness.env, "", ["--rules-default", "-y"]);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /AI Analysis \(via rules\(model-core\)\)/);
+  assert.match(result.stdout, /AI: Keep[\s\S]*deepseek-r1:8b/);
+  const written = readConfig(harness.configPath);
+  assert.deepEqual(written.agents.sisyphus.routing || [], []);
+  assert.equal(written.agents.sisyphus.fallback_models.at(-1), "local/deepseek-r1:8b");
+});
+
+test("installed local tie-break writes canonical local fallback last without routing", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 32000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
+    gpu: { name: "Tie GPU", vramGb: 24 },
+    localCatalog: [
+      { name: "deepseek-r1-a:8b", size: "7.0 GB", vram: 7, score: 10, baseModel: "deepseek-r1", tag: "8b" },
+      { name: "deepseek-r1-b:8b", size: "7.0 GB", vram: 7, score: 10, baseModel: "deepseek-r1", tag: "8b" },
+    ],
+    ollamaModels: [{ name: "deepseek-r1-b:8b", size: "7.0GB" }],
+    validator: { code: 0 },
+    aiResponse: {
+      analysis: "dynamic local tie",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle", reason: "cloud primary" },
+          routing: [{ provider: "local", model: "deepseek-r1-a:8b", reason: "bad local route" }],
+          fallback_models: [
+            { provider: "opencode", model: "north-mini-code-free", reason: "cloud fallback" },
+          ],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(
+    harness.env,
+    "",
+    ["-y", "--ai-panel", "--model", "opencode/big-pickle"],
+  );
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /AI: Keep[\s\S]*deepseek-r1-b:8b/);
+  const written = readConfig(harness.configPath);
+  assert.deepEqual(written.agents.sisyphus.routing || [], []);
+  assert.deepEqual(written.agents.sisyphus.fallback_models, [
+    "opencode/north-mini-code-free",
+    "local/deepseek-r1-b:8b",
+  ]);
+});
+
 test("interactive orphan uninstall apply exits after Done without SIGINT", async (t) => {
   const harness = createHarness(t, {
     config: defaultConfig(),
@@ -843,7 +976,7 @@ test("interactive orphan uninstall apply exits after Done without SIGINT", async
 
   const result = await runCliRaw(
     harness.env,
-    ["y\n", "y\n"],
+    ["y\n", "", "", "", "", "", "y\n"],
     ["--interactive"],
     2000,
   );
@@ -1638,11 +1771,19 @@ test("exclude free models flags and print transparency logs", async (t) => {
 
 test("no-install flag prints skipped message", async (t) => {
   const harness = createHarness(t, {
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 32000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
     localCatalog: [
-      { name: "local-model-a:latest", size: "8B", vram: 6, score: 80, baseModel: "local-model-a", tag: "latest" },
-      { name: "local-model-b:latest", size: "8B", vram: 6, score: 80, baseModel: "local-model-b", tag: "latest" },
+      { name: "deepseek-r1-a:7b", size: "6.4 GB", vram: 6.4, score: 80, baseModel: "deepseek-r1", tag: "7b" },
+      { name: "deepseek-r1-b:8b", size: "7.0 GB", vram: 7, score: 90, baseModel: "deepseek-r1", tag: "8b" },
     ],
-    ollamaModels: [{ name: "local-model-a:latest" }],
+    ollamaModels: [{ name: "deepseek-r1-a:7b" }],
     gpu: {
       hasGpu: true,
       name: "RTX 4090",
@@ -1653,7 +1794,7 @@ test("no-install flag prints skipped message", async (t) => {
       root: {
         agents: {
           sisyphus: {
-            model: "ollama/local-model-a:latest",
+            model: "ollama/deepseek-r1-a:7b",
             fallback_models: [],
           },
         },
@@ -1665,7 +1806,7 @@ test("no-install flag prints skipped message", async (t) => {
         {
           name: "sisyphus",
           type: "agent",
-          model: { provider: "ollama", model: "local-model-b:latest" },
+          model: { provider: "ollama", model: "deepseek-r1-b:8b" },
           routing: [],
           fallback_models: [],
         },
@@ -1680,5 +1821,5 @@ test("no-install flag prints skipped message", async (t) => {
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /skipped installation of local-model-b:latest via --no-install/);
+  assert.match(result.stdout, /skipped installation of deepseek-r1-b:8b via --no-install/);
 });
