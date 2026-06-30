@@ -221,14 +221,13 @@ function showLocalDecisions(aiResult, allLocalModels, ollama, localRecommendatio
 
     if (placements && placements.length > 0) {
       console.log(
-        `\n── AI: Local config placements (${placements.length}) ────────`,
+        `\n── Local fallback entries to write (${placements.length}) ────────`,
       );
       for (const p of placements) {
-        console.log(
-          `  • ${p.modelName} → ${p.agentName} (${p.role})`,
-        );
-        if (p.justification)
-          console.log(`    Justification: ${p.justification}`);
+        const target = p.role === "primary" ? "model" : "fallback_models";
+        const action = p.role === "primary" ? "set" : "add";
+        console.log(`  • ${p.agentName}: ${action} ${p.modelName} to ${target}`);
+        if (p.justification) console.log(`    Why: ${p.justification}`);
       }
     }
 

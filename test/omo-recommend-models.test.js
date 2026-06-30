@@ -882,6 +882,9 @@ test("default rule matcher appends dynamic installed local fallback last", async
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /AI Analysis \(via rules\(model-core\)\)/);
+  assert.match(result.stdout, /Local fallback entries to write/);
+  assert.match(result.stdout, /sisyphus: add deepseek-r1:8b to fallback_models/);
+  assert.match(result.stdout, /Why: Best fitting local reasoning fallback for sisyphus/);
   assert.match(result.stdout, /AI: Keep[\s\S]*deepseek-r1:8b/);
   const written = readConfig(harness.configPath);
   assert.deepEqual(written.agents.sisyphus.routing || [], []);
