@@ -386,7 +386,14 @@ function runCliRaw(env, input = "", args = ["--dry-run", "--cloud-only"], timeou
       clearTimeout(timer);
       resolve({ code, signal, stdout, stderr, timedOut });
     });
-    child.stdin.end(input);
+    if (Array.isArray(input)) {
+      input.forEach((chunk, index) => {
+        setTimeout(() => child.stdin.write(chunk), index * 100).unref();
+      });
+      setTimeout(() => child.stdin.end(), input.length * 100 + 100).unref();
+    } else {
+      child.stdin.end(input);
+    }
   });
 }
 
@@ -788,6 +795,53 @@ test("canonical local output is local slash refs and local models never enter ro
     localRefs.includes("local/tinyllama:1.1b"),
   );
   assert.doesNotMatch(fs.readFileSync(harness.configPath, "utf8"), /ollama\/tinyllama:1\.1b/);
+});
+
+test("interactive orphan uninstall apply exits after Done without SIGINT", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig(),
+    providerCache: {
+      models: {
+        opencode: [{ id: "big-pickle", family: "opencode-north", context_length: 200000 }],
+      },
+    },
+    gpu: { name: "Small Test GPU", vramGb: 8 },
+    localCatalog: [
+      { name: "qwen2.5-coder:1.5b", size: "1.5 GB", vram: 1.5, score: 92, baseModel: "qwen", tag: "1.5b" },
+    ],
+    ollamaModels: [
+      { name: "qwen2.5-coder:1.5b", size: "1.5GB" },
+      { name: "orphan:1b", size: "0.6GB" },
+    ],
+    validator: { code: 0 },
+    aiResponse: {
+      analysis: "remove orphan",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle", reason: "best cloud" },
+          routing: [],
+          fallback_models: [],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCliRaw(
+    harness.env,
+    ["y\n", "y\n"],
+    ["--interactive"],
+    2000,
+  );
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Remove these 2 model\(s\) to free disk space\? \(y\/N\)/);
+  assert.match(result.stdout, /removed orphan:1b/);
+  assert.match(result.stdout, /\u2705 Done\./);
 });
 
 test("non-interactive runs preview by default and do not write config without yes", async (t) => {

@@ -29,6 +29,7 @@ test("createRuleBasedRecommendations selects the first available upstream-chain 
     cloudLookup: lookup({
       "opencode-go": ["kimi-k2.6"],
       openai: ["gpt-5.5"],
+      opencode: ["big-pickle"],
     }),
   });
 
@@ -38,6 +39,14 @@ test("createRuleBasedRecommendations selects the first available upstream-chain 
   const sisyphus = result.cloudRecommendations.find((rec) => rec.name === "sisyphus");
   assert.equal(sisyphus.model.provider, "opencode-go");
   assert.equal(sisyphus.model.model, "kimi-k2.6");
+  assert.deepEqual(
+    sisyphus.routing.map((ref) => `${ref.provider}/${ref.model}`),
+    ["openai/gpt-5.5", "opencode/big-pickle"],
+  );
+  assert.deepEqual(
+    sisyphus.fallback_models.map((ref) => `${ref.provider}/${ref.model}`),
+    ["openai/gpt-5.5", "opencode/big-pickle"],
+  );
   assert.equal(sisyphus.fallback_models[0].provider, "openai");
   assert.equal(sisyphus.fallback_models[0].variant, "medium");
 
