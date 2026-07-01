@@ -5,6 +5,7 @@ import {
   skippedGpu,
   skippedOllama,
 } from "../../lib/recommend/local-environment.js";
+import { discoverModels } from "../../lib/recommend/ollama-registry.js";
 
 test("skippedGpu returns cloud-only GPU placeholder", () => {
   assert.deepEqual(skippedGpu(), {
@@ -22,4 +23,27 @@ test("skippedOllama returns empty cloud-only Ollama state", () => {
     version: null,
     models: [],
   });
+});
+
+test("discoverModels reports known registry totals through progress API", async () => {
+  const calls = [];
+  const progress = {
+    setTotal(total) {
+      calls.push(["setTotal", total]);
+    },
+    set(current, message) {
+      calls.push(["set", current, message]);
+    },
+    done(message) {
+      calls.push(["done", message]);
+    },
+  };
+
+  await discoverModels(true, progress, async () => JSON.stringify({ layers: [] }));
+
+  const totalCall = calls.find((call) => call[0] === "setTotal");
+  const setCalls = calls.filter((call) => call[0] === "set");
+  assert.ok(totalCall[1] > 0);
+  assert.equal(setCalls.length, totalCall[1]);
+  assert.match(String(calls.at(-1)[1]), /models cataloged/);
 });

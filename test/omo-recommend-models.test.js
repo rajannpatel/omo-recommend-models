@@ -1436,6 +1436,7 @@ test("exclude rate limited flag removes rate-limited providers from AI Panel", a
   assert.equal(result.timedOut, false, result.stderr);
   // New prompt format shows three choices
   assert.match(result.stdout, /You will have a chance to influence which AI providers/);
+  assert.match(result.stdout, /Verifying paid models availability: 1\/2/);
   assert.match(result.stdout, /good-prov\/unknown: model-2/);
   // Rate-limited provider should not appear in the AI Panel query list
   const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
@@ -1852,6 +1853,7 @@ test("invalid CLI probe output is excluded from the AI Panel before voting", asy
   assert.doesNotMatch(result.stdout, /CLI agents: codex/);
   assert.match(result.stdout, /Verifying panel models availability: 4 of 5 model\(s\) available/);
   assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
+  assert.match(result.stdout, /AI Panel evaluations: 4\/4/);
   assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
   assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
   assert.match(result.stdout, /AI Analysis \(via panel\(agy\+tier-one\+north-mini-code-free\+tier-two\)\)/);
