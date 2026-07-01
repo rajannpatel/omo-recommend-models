@@ -20,17 +20,21 @@ $ npx omo-recommend-models --cloud-only --yes
 │
 ◇  Discovering local model catalog: skipped by --cloud-only
 │
-◇  Loading cloud provider cache: 5 provider(s)
-✓ Rule matcher: 5 provider(s) loaded from OpenCode model cache
-
-📊 AI Analysis (via rules(model-core)):
-   Assigned from upstream oh-my-openagent model fallback rules after loading provider availability.
-
-  • agents.sisyphus
-    model: openai/gpt-5.5
-    fallback_models: opencode/big-pickle, opencode/nemotron-3-ultra-free
-
-   → Apply: omo-recommend-models
+✓ Loaded: 5 providers from ~/.cache/oh-my-opencode/provider-models.json
+│  Filtered against live models (via `opencode models --pure`) to prevent stale entries
+│
+◇  📊 AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
+│  - https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
+│  - https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/category-model-requirements.ts
+│
+◇  Recommended provider/model configurations for ~/.opencode/oh-my-openagent.jsonc:
+│  • agents.sisyphus
+│    model: openai/gpt-5.5
+│    fallback_models:
+│      1. opencode/big-pickle
+│      2. opencode/nemotron-3-ultra-free
+│
+│  → Dry run mode enabled; no changes have been applied.
 
 ```
 

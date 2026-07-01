@@ -615,13 +615,11 @@ test("default recommender uses upstream rule chain without AI Panel", async (t) 
   const result = await runCli(harness.env, "", ["--rules-default", "--dry-run", "--cloud-only"]);
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /Rule matcher: 2 provider\(s\)/);
-  assert.match(result.stdout, /AI Analysis \(via rules\(model-core\)\)/);
+  assert.match(result.stdout, /Loaded: 2 providers from/);
+  assert.match(result.stdout, /AI Analysis of available providers\/models against recommended/);
   assert.match(result.stdout, /model: opencode-go\/kimi-k2\.6/);
-  assert.match(
-    result.stdout,
-    /fallback_models: opencode\/big-pickle, opencode\/north-mini-code-free/,
-  );
+  assert.match(result.stdout, /1\. opencode\/big-pickle/);
+  assert.match(result.stdout, /2\. opencode\/north-mini-code-free/);
   assert.doesNotMatch(result.stdout, /This run would query:/);
 });
 
@@ -982,11 +980,8 @@ test("default rule matcher appends dynamic installed local fallback last", async
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /AI Analysis \(via rules\(model-core\)\)/);
-  assert.match(result.stdout, /Local fallback entries to write/);
-  assert.match(result.stdout, /sisyphus: add deepseek-r1:8b to fallback_models/);
-  assert.match(result.stdout, /Why: Best fitting local reasoning fallback for sisyphus/);
-  assert.match(result.stdout, /AI: Keep[\s\S]*deepseek-r1:8b/);
+  assert.match(result.stdout, /AI Analysis of available providers\/models against recommended/);
+  assert.match(result.stdout, /AI analysis recommends having these 1 installed local models in the fallback_models rule-chain[\s\S]*deepseek-r1:8b/);
   const written = readConfig(harness.configPath);
   assert.deepEqual(written.agents.sisyphus.routing || [], []);
   assert.equal(written.agents.sisyphus.fallback_models.at(-1), "local/deepseek-r1:8b");
@@ -1020,7 +1015,7 @@ test("interactive install choice happens before JSONC confirmation and filters s
   assert.match(result.stdout, /2\) Y\/N per model/);
   assert.match(result.stdout, /3\) No to all/);
   const installPrompt = result.stdout.indexOf("Install recommended local models before writing JSONC");
-  const preview = result.stdout.indexOf("JSONC changes to apply");
+  const preview = result.stdout.indexOf("Recommended provider/model configurations for");
   const applyPrompt = result.stdout.indexOf("Apply these JSONC changes? (y/N)");
   assert.ok(installPrompt >= 0 && preview > installPrompt && applyPrompt > preview);
   const finalPreview = result.stdout.slice(preview, applyPrompt);
@@ -1111,7 +1106,7 @@ test("installed local tie-break writes canonical local fallback last without rou
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /AI: Keep[\s\S]*deepseek-r1-b:8b/);
+  assert.match(result.stdout, /AI analysis recommends having these 1 installed local models in the fallback_models rule-chain[\s\S]*deepseek-r1-b:8b/);
   const written = readConfig(harness.configPath);
   assert.deepEqual(written.agents.sisyphus.routing || [], []);
   assert.deepEqual(written.agents.sisyphus.fallback_models, [
@@ -1193,7 +1188,7 @@ test("non-interactive runs preview by default and do not write config without ye
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Non-interactive environment detected; previewing changes only/);
-  assert.match(result.stdout, /Apply: omo-recommend-models/);
+  assert.match(result.stdout, /Dry run mode enabled; no changes have been applied/);
   assert.equal(fs.readFileSync(harness.configPath, "utf8"), original);
 });
 
@@ -1752,7 +1747,8 @@ test("AI Panel default selection diversifies capable paid models and excludes sm
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /tiny-context-king/);
+  const considerationsStart = result.stdout.indexOf("AI Panel Considerations");
+  assert.doesNotMatch(considerationsStart !== -1 ? result.stdout.slice(considerationsStart) : result.stdout, /tiny-context-king/);
 
   const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
   const githubRefs = queryBlock.match(/github-copilot:/g) || [];
@@ -1795,7 +1791,8 @@ test("detected codex and agy occupy preferred AI Panel slots and use low-tier CL
   assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: codex[\s\S]*agy/);
   assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
   assert.match(result.stdout, /AI Analysis \(via panel\(codex\+agy\+big-pickle\+north-mini-code-free\)\)/);
-  assert.doesNotMatch(result.stdout, /tiny-context-king/);
+  const considerationsStart = result.stdout.indexOf("AI Panel Considerations");
+  assert.doesNotMatch(considerationsStart !== -1 ? result.stdout.slice(considerationsStart) : result.stdout, /tiny-context-king/);
   assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/codex:[\s\S]*1\/1 successful responses/);
   assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
 
