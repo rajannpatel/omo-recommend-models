@@ -95,6 +95,7 @@ function writeFakeOpencode(binDir, aiResponse = defaultAiResponse, providerCache
   const fakePath = path.join(binDir, "opencode");
   const fakeJsPath = path.join(binDir, "opencode.js");
   const responseJson = JSON.stringify(aiResponse);
+  const failRunModelsJson = JSON.stringify(options.failRunModels || []);
   const extraModels = [];
   if (providerCache && providerCache.models) {
     for (const [providerId, modelsArray] of Object.entries(providerCache.models)) {
@@ -114,6 +115,7 @@ const args = process.argv.slice(2);
 const logPath = process.env.OMO_FAKE_LOG;
 const promptPath = process.env.OMO_FAKE_PROMPT_LOG;
 const response = ${responseJson};
+const failRunModels = new Set(${failRunModelsJson});
 const NL = String.fromCharCode(10);
 if (logPath) fs.appendFileSync(logPath, JSON.stringify(args) + NL);
 if (promptPath && args[0] === "run") fs.appendFileSync(promptPath, args[args.length - 1] + NL + "---PROMPT---" + NL);
@@ -127,6 +129,10 @@ ${extraModelsStr}
 } else if (args[0] === "run") {
   const model = args[args.indexOf("--model") + 1];
   const pure = args.includes("--pure");
+  if (failRunModels.has(model)) {
+    process.stderr.write("Error: model is not available" + NL);
+    process.exit(1);
+  }
   if (model && model.includes("quota-exceeded")) {
     process.stderr.write("Error: billing quota exceeded (HTTP 402)" + NL);
     process.exit(1);
@@ -640,6 +646,46 @@ test("default recommender strips manually excluded quota models", async (t) => {
   assert.match(result.stdout, /Excluded by override: opencode-go\/kimi-k2\.6/);
   assert.match(result.stdout, /model: opencode\/big-pickle/);
   assert.doesNotMatch(result.stdout, /model: opencode-go\/kimi-k2\.6/);
+});
+
+test("default recommender does not assign paid model refs that fail verification", async (t) => {
+  // Given: OpenAI has one unavailable high-scoring variant and one available model.
+  const harness = createHarness(t, {
+    config: defaultConfig({
+      root: {
+        agents: {
+          hephaestus: { description: "deep worker" },
+        },
+        categories: {},
+      },
+    }),
+    providerCache: {
+      models: {
+        openai: [
+          { id: "gpt-5.5-pro", family: "gpt", context_length: 200000 },
+          { id: "gpt-4.1", family: "gpt", context_length: 200000 },
+        ],
+        opencode: [{ id: "big-pickle", family: "glm", context_length: 200000 }],
+      },
+    },
+    opencodeOptions: {
+      failRunModels: ["openai/gpt-5.5-pro"],
+    },
+  });
+
+  // When: the deterministic rules recommender verifies paid providers first.
+  const result = await runCli(
+    harness.env,
+    "",
+    ["--rules-default", "--dry-run", "--cloud-only"],
+  );
+
+  // Then: the failed model ref is never written as primary or fallback output.
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /model: openai\/gpt-4\.1/);
+  assert.doesNotMatch(result.stdout, /model: openai\/gpt-5\.5-pro/);
+  assert.doesNotMatch(result.stdout, /fallback_models: .*openai\/gpt-5\.5-pro/);
 });
 
 test("normalizes Ollama recommendations to local model refs with startup progress", async (t) => {

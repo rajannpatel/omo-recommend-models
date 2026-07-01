@@ -163,6 +163,35 @@ test("createRuleBasedRecommendations uses paid and free picks after chain exhaus
   assert.match(result.analysis, /tried: \(openai, github-copilot, opencode, vercel\)\/gpt-5.5/);
 });
 
+test("createRuleBasedRecommendations skips disallowed outside-chain paid refs", () => {
+  const config = {
+    agents: {
+      hephaestus: { description: "deep worker" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      openai: ["gpt-5.5-pro", "gpt-4.1"],
+      opencode: ["utility-free"],
+    }),
+    isModelAllowed: ({ provider, model }) =>
+      `${provider}/${model}` !== "openai/gpt-5.5-pro",
+  });
+
+  const hephaestus = result.cloudRecommendations[0];
+  assert.equal(hephaestus.model.provider, "openai");
+  assert.equal(hephaestus.model.model, "gpt-4.1");
+  assert.equal(
+    hephaestus.fallback_models.some(
+      (ref) => `${ref.provider}/${ref.model}` === "openai/gpt-5.5-pro",
+    ),
+    false,
+  );
+});
+
 test("createRuleBasedRecommendations resolves provider-local model spelling variants", () => {
   const config = {
     agents: {
