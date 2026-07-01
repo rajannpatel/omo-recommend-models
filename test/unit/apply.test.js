@@ -83,6 +83,10 @@ if (section.routing || section.model_quality || !config.git_master) {
   });
 
   const written = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  assert.equal(
+    written.$schema,
+    "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/master/assets/oh-my-opencode.schema.json",
+  );
   assert.equal("routing" in written.agents.sisyphus, false);
   assert.equal("model_quality" in written.agents.sisyphus, false);
   assert.equal(written.agents.sisyphus.model, "local/local-model-a:latest");

@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   CLI_VERSION,
+  DEFAULT_SCHEMA,
   parseCliOptions,
   runValidateConfigCli,
   validateConfigUsage,
 } from "../../lib/index.js";
+import { defaultConfig } from "../../lib/shared/default-config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,9 +36,18 @@ test("package exposes both npx command entrypoints", () => {
 
 test("public package entry exports stable CLI helpers", () => {
   assert.equal(CLI_VERSION, packageJson.version);
+  assert.equal(
+    DEFAULT_SCHEMA,
+    "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/master/assets/oh-my-opencode.schema.json",
+  );
+  assert.equal(DEFAULT_SCHEMA.includes("/dev/"), false);
   assert.equal(typeof parseCliOptions, "function");
   assert.equal(typeof runValidateConfigCli, "function");
   assert.match(validateConfigUsage(), /^Usage: omo-validate-config \[--config <path>\]/);
+});
+
+test("generated default config uses the stable upstream schema branch", () => {
+  assert.equal(defaultConfig().$schema, DEFAULT_SCHEMA);
 });
 
 test("package export map resolves from package self-reference", () => {
