@@ -174,3 +174,59 @@ test("completeAiRecommendations replaces panel-supplied locals with one context-
     [{ name: "qwen2.5-coder:8b", action: "install" }],
   );
 });
+
+test("completeAiRecommendations filters blocked models per provider", () => {
+  const config = {
+    agents: {
+      sisyphus: { description: "reasoning lead" },
+    },
+    categories: {},
+  };
+  const cloudLookup = {
+    byId: {
+      opencode: new Map([
+        ["gpt-5.5", { context_length: 200000 }],
+        ["fallback-free", { context_length: 200000 }],
+      ]),
+      "github-copilot": new Map([
+        ["gpt-5.5", { context_length: 200000 }],
+      ]),
+    },
+    sets: {},
+  };
+  const aiResult = {
+    cloudRecommendations: [
+      {
+        name: "sisyphus",
+        type: "agent",
+        model: { provider: "opencode", model: "gpt-5.5", reason: "blocked primary" },
+        routing: [],
+        fallback_models: [
+          { provider: "github-copilot", model: "gpt-5.5", reason: "same model via another provider" },
+        ],
+      },
+    ],
+    localModels: { decisions: [], placements: [] },
+  };
+  const rejected = new Set(["opencode/gpt-5.5"]);
+
+  const completed = completeAiRecommendations(
+    aiResult,
+    config,
+    cloudLookup,
+    [],
+    { hasGpu: false, vramGb: 0 },
+    { models: [] },
+    () => true,
+    null,
+    ({ provider, model }) => !rejected.has(`${provider}/${model}`),
+  );
+
+  const [rec] = completed.cloudRecommendations;
+  assert.equal(rec.model.provider, "github-copilot");
+  assert.equal(rec.model.model, "gpt-5.5");
+  assert.deepEqual(
+    rec.fallback_models.map((fallback) => `${fallback.provider}/${fallback.model}`),
+    ["opencode/fallback-free"],
+  );
+});

@@ -691,6 +691,40 @@ test("default recommender does not assign paid model refs that fail verification
   assert.doesNotMatch(result.stdout, /fallback_models: .*openai\/gpt-5\.5-pro/);
 });
 
+test("default recommender blocks failed opencode model while keeping same model through copilot", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig({
+      root: {
+        agents: {
+          sisyphus: { description: "lead orchestrator" },
+        },
+        categories: {},
+      },
+    }),
+    providerCache: {
+      models: {
+        opencode: [{ id: "gpt-5.5", family: "gpt", context_length: 200000 }],
+        "github-copilot": [{ id: "gpt-5.5", family: "gpt", context_length: 200000 }],
+      },
+    },
+    opencodeOptions: {
+      failRunModels: ["opencode/gpt-5.5"],
+    },
+  });
+
+  const result = await runCli(
+    harness.env,
+    "",
+    ["--rules-default", "--dry-run", "--cloud-only"],
+  );
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /model: github-copilot\/gpt-5\.5/);
+  assert.doesNotMatch(result.stdout, /model: opencode\/gpt-5\.5/);
+  assert.doesNotMatch(result.stdout, /fallback_models: .*opencode\/gpt-5\.5/);
+});
+
 test("normalizes Ollama recommendations to local model refs with startup progress", async (t) => {
   const harness = createHarness(t, {
     gpu: { name: "Small Test GPU", vramGb: 8 },
@@ -830,6 +864,17 @@ test("stale panel cache is rejected before recommendations are displayed", async
 
 test("panel picker label and recommendation preview uses bulleted format", async (t) => {
   const harness = createHarness(t, {
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+        ],
+        "github-copilot": [
+          { id: "gpt-5.5", family: "gpt", context_length: 200000 },
+          { id: "gpt-4.1", family: "gpt", context_length: 128000 },
+        ],
+      },
+    },
     aiResponse: {
       analysis: "preview recommendations",
       cloudRecommendations: [
@@ -837,10 +882,10 @@ test("panel picker label and recommendation preview uses bulleted format", async
           name: "sisyphus",
           type: "agent",
           profile: "orchestrator",
-          model: { provider: "opencode", model: "big-pickle", reason: "best cloud" },
+          model: { provider: "github-copilot", model: "gpt-5.5", reason: "best cloud" },
           routing: [],
           fallback_models: [
-            { provider: "opencode", model: "north-mini-code-free", reason: "cheap fallback" },
+            { provider: "github-copilot", model: "gpt-4.1", reason: "cheap fallback" },
           ],
         },
       ],
@@ -1490,7 +1535,7 @@ test("exclude rate limited flag removes rate-limited providers from AI Panel", a
   assert.equal(result.timedOut, false, result.stderr);
   // New prompt format shows three choices
   assert.match(result.stdout, /You will have a chance to influence which AI providers/);
-  assert.match(result.stdout, /Verifying paid models availability: 1\/2/);
+  assert.match(result.stdout, /Verifying paid models availability: good-prov checked [12]\/2/);
   assert.match(result.stdout, /good-prov\/unknown: model-2/);
   // Rate-limited provider should not appear in the AI Panel query list
   const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
@@ -1907,12 +1952,12 @@ test("invalid CLI probe output is excluded from the AI Panel before voting", asy
   // Only working CLI agent (agy) should appear in the query list
   assert.match(result.stdout, /This run would query:[\s\S]*CLI agents: agy/);
   assert.doesNotMatch(result.stdout, /CLI agents: codex/);
-  assert.match(result.stdout, /Verifying panel models availability: 4 of 5 model\(s\) available/);
-  assert.match(result.stdout, /AI Panel: 1 agents, 4 panel models/);
-  assert.match(result.stdout, /AI Panel evaluations: 4\/4/);
+  assert.match(result.stdout, /Verifying panel models availability: 3 of 4 model\(s\) available/);
+  assert.match(result.stdout, /AI Panel: 1 agents, 3 panel models/);
+  assert.match(result.stdout, /AI Panel evaluations: 3\/3/);
   assert.doesNotMatch(result.stdout, /Final successful responses:[\s\S]*cli\/codex:/);
   assert.match(result.stdout, /Final successful responses:[\s\S]*cli\/agy:[\s\S]*1\/1 successful responses/);
-  assert.match(result.stdout, /AI Analysis \(via panel\(agy\+tier-one\+north-mini-code-free\+tier-two\)\)/);
+  assert.match(result.stdout, /AI Analysis \(via panel\(agy\+tier-one\+tier-two\)\)/);
 });
 
 test("exclude CLI agent flags and print transparency logs", async (t) => {

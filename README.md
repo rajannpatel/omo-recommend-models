@@ -179,7 +179,7 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
     The local memory estimate is approximate: model weight comes from Ollama manifest layer sizes when available, then catalog metadata, and KV cache is estimated from target context and parameter count. Candidates with unsafe missing metadata are rejected instead of guessed. When no same-specialty local model fits, the CLI prints a hardware deficit warning with practical next steps such as lowering context, installing a smaller model, using `--cloud-only`, or upgrading VRAM.
 * **Rate-limit and quota filtering**
 
-    Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured paid providers before deterministic rule matching or AI panel selection, removes blocked providers from primary, routing, and `fallback_models`, and sanitizes cached/panel recommendations before writing JSONC.
+    Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured cloud models before deterministic rule matching or AI panel selection, removes blocked models from primary and `fallback_models`, and sanitizes cached/panel recommendations before writing JSONC.
 * **Panel model selection**
 
     If you pass `--model provider/model`, those models are used for the AI panel. Otherwise the CLI can use configured `omo.panel_models`, selected paid models, or the default top free OpenCode panel models.
@@ -197,7 +197,6 @@ SCHEMA:
   "type": "agent|category",
   "profile": str,
   "model": {"provider": str, "model": str, "reason": str},
-  "routing": [{"provider": str, "model": str, "reason": str}],
   "fallback_models": [{"provider": str, "model": str, "reason": str}]
 }
 
@@ -212,36 +211,33 @@ LOCAL (<count> fit VRAM):
 
 LOCAL_WARNING: <hardware deficit warning when no same-specialty local model fits>
 
-FIELDS: model=primary routing=delegation_pool fallback_models=retry_pool
+FIELDS: model=primary fallback_models=retry_pool
 RULES:
-- Sort routing and fallback_models by score descending.
+- Sort fallback_models by score descending.
 - Paid/cloud as primary for reasoning/code agents.
 - Free model as fallback unless utility agent (explore/librarian/quick).
 - Prefer highest-scored cloud model for primary unless GPU requirements force local.
 - For utility agents, use highest-scored free cloud as primary.
 - For other agents, prioritize highest-scored paid/cloud model.
-- Fill routing with next highest-scored cloud models.
 - Set three fallback_models when possible:
   * Slot 1 closely matches the primary model in intelligence and token window.
   * Slot 2 is a highly available, fast mid-tier model.
   * Slot 3 is the cheapest, highest-rate-limit model.
-- Remove duplicate entries across model, routing, and fallback_models.
-- No local models in routing arrays.
+- Remove duplicate entries across model and fallback_models.
 ```
 
-The real prompt also includes a few concrete examples so the panel models keep `model`, `routing`, and `fallback_models` distinct.
+The real prompt also includes concrete examples so panel models keep the primary `model` and retry `fallback_models` distinct.
 
 ## How `fallback_models` are determined
 
 By default, the CLI starts from upstream `rules(model-core)` fallback chains. With `--ai-panel`, the panel votes independently for each agent/category. In both modes, the CLI then:
 
 1. Picks or preserves the primary `model` from the rule chain or AI Panel consensus.
-2. Adds cloud `routing` entries from rule chains or panel consensus.
-3. Adds cloud `fallback_models` entries from rule chains or panel consensus.
-4. Fills in missing cloud providers with each provider's highest-scored model, so a config is not dominated by one provider.
-5. Adds at most one computed local fallback for each entry when local discovery finds a fitting candidate for that entry's role.
-6. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
-7. Deduplicates `fallback_models`, removes anything that duplicates the primary model, and orders local fallbacks last after cloud fallbacks.
-8. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
+2. Adds cloud `fallback_models` entries from rule chains or panel consensus.
+3. Fills in missing cloud providers with each provider's highest-scored model, so a config is not dominated by one provider.
+4. Adds at most one computed local fallback for each entry when local discovery finds a fitting candidate for that entry's role.
+5. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
+6. Deduplicates `fallback_models`, removes anything that duplicates the primary model, and orders local fallbacks last after cloud fallbacks.
+7. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
 
 In `--rebalance` mode, the AI panel is skipped. The CLI instead builds tier chains directly from model scores and restructures existing `model` plus `fallback_models` assignments around those score tiers.

@@ -163,6 +163,37 @@ test("createRuleBasedRecommendations uses paid and free picks after chain exhaus
   assert.match(result.analysis, /tried: \(openai, github-copilot, opencode, vercel\)\/gpt-5.5/);
 });
 
+test("createRuleBasedRecommendations adds the best usable fallback from each outside-chain provider", () => {
+  const config = {
+    agents: {
+      hephaestus: { description: "deep worker" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "paid-a": ["tiny-mini", "large-pro"],
+      "paid-b": ["reasoning-plus", "small-lite"],
+      opencode: ["free-large", "free-mini"],
+    }),
+    isModelAllowed: ({ provider, model }) =>
+      `${provider}/${model}` !== "paid-b/reasoning-plus",
+  });
+
+  const hephaestus = result.cloudRecommendations[0];
+  assert.deepEqual(
+    [hephaestus.model, ...hephaestus.fallback_models]
+      .map((ref) => `${ref.provider}/${ref.model}`),
+    ["paid-a/large-pro", "paid-b/small-lite", "opencode/free-large", "opencode/free-mini"],
+  );
+  assert.equal(
+    hephaestus.model.reason,
+    "Best available paid model outside upstream rule chain",
+  );
+});
+
 test("createRuleBasedRecommendations skips disallowed outside-chain paid refs", () => {
   const config = {
     agents: {
