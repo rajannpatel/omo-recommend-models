@@ -1018,14 +1018,14 @@ test("interactive orphan uninstall apply exits after Done without SIGINT", async
 
   const result = await runCliRaw(
     harness.env,
-    ["y\n", "", "", "", "", "", "y\n"],
+    ["y\n", "", "", "", "", "", "\n"],
     ["--interactive"],
     2000,
   );
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /Remove these 2 model\(s\) to free disk space\? \(y\/N\)/);
+  assert.match(result.stdout, /Remove local models deemed unnecessary\? \[Y\/n\]/);
   assert.match(result.stdout, /removed orphan:1b/);
   assert.match(result.stdout, /\u2705 Done\./);
 });
