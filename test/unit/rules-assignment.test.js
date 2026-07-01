@@ -162,3 +162,29 @@ test("createRuleBasedRecommendations uses paid and free picks after chain exhaus
   assert.equal(hephaestus.fallback_models[0].model, "utility-free");
   assert.match(result.analysis, /tried: \(openai, github-copilot, opencode, vercel\)\/gpt-5.5/);
 });
+
+test("createRuleBasedRecommendations resolves provider-local model spelling variants", () => {
+  const config = {
+    agents: {
+      librarian: { description: "research librarian" },
+      explore: { description: "code explorer" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "github-copilot": ["Claude 4.5 Haiku"],
+    }),
+  });
+
+  assert.doesNotMatch(result.analysis, /No available rule-chain models/);
+  assert.deepEqual(
+    result.cloudRecommendations.map((rec) => `${rec.name}:${rec.model.provider}/${rec.model.model}`),
+    [
+      "librarian:github-copilot/Claude 4.5 Haiku",
+      "explore:github-copilot/Claude 4.5 Haiku",
+    ],
+  );
+});

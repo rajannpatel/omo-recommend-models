@@ -1403,7 +1403,7 @@ test("async probe of paid models and selecting paid in prompt", async (t) => {
   // New prompt format shows three choices instead of "Paid models"
   assert.match(result.stdout, /You will have a chance to influence which AI providers/);
   assert.match(result.stdout, /good-prov\/unknown: model-2/);
-  assert.match(result.stdout, /quota-exceeded-prov\/unknown: model-1/);
+  assert.doesNotMatch(result.stdout, /quota-exceeded-prov\/unknown: model-1/);
 });
 
 test("exclude rate limited flag removes rate-limited providers from AI Panel", async (t) => {
@@ -1607,7 +1607,7 @@ test("interactive model picker shows three-source prompt", async (t) => {
   assert.match(result.stdout, /You will have a chance to influence which AI providers/);
   assert.match(result.stdout, /providers/);
   assert.match(result.stdout, /good-prov\/model-paid/);
-  assert.match(result.stdout, /quota-exceeded-prov\/model-bad/);
+  assert.doesNotMatch(result.stdout, /quota-exceeded-prov\/model-bad/);
 });
 
 test("interactive free model inclusion/exclusion prompts for AI Panel and JSONC config", async (t) => {
