@@ -39,7 +39,7 @@ evaluating -
    • agents:                           21/21
 
 
-📊 AI Analysis (via panel(nemotron-3-ultra-free+mimo-v2.5-free+deepseek-v4-flash-free+big-pickle+north-mini-code-free)):
+AI Analysis (via panel(nemotron-3-ultra-free+mimo-v2.5-free+deepseek-v4-flash-free+big-pickle+north-mini-code-free)):
    Per-agent consensus across 5 panel models for 21 agent(s)
 
   • agents.sisyphus

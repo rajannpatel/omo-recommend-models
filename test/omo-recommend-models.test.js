@@ -63,6 +63,10 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function writeConfig(homeDir, config = defaultConfig()) {
   const configPath = path.join(homeDir, ".opencode", "oh-my-openagent.jsonc");
   writeJson(configPath, config);
@@ -617,6 +621,7 @@ test("default recommender uses upstream rule chain without AI Panel", async (t) 
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Loaded: 2 providers from/);
   assert.match(result.stdout, /AI Analysis of available providers\/models against recommended/);
+  assert.match(result.stdout, /│  • https:\/\/github\.com\/code-yeongyu\/oh-my-openagent\/blob\/dev\/packages\/model-core\/src\/agent-model-requirements\.ts/);
   assert.match(result.stdout, /model: opencode-go\/kimi-k2\.6/);
   assert.match(result.stdout, /1\. opencode\/big-pickle/);
   assert.match(result.stdout, /2\. opencode\/north-mini-code-free/);
@@ -949,7 +954,7 @@ test("dynamic local selection uses ninety percent VRAM budget and no-install ski
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /AI: Install[\s\S]*deepseek-r1:8b/);
+  assert.match(result.stdout, /◇  AI analysis recommends these 1 local models[\s\S]*deepseek-r1:8b/);
   assert.match(result.stdout, /skipped installation of deepseek-r1:8b via --no-install/);
   assert.doesNotMatch(result.stdout, /skipped installation of deepseek-r1:7b/);
   const written = readConfig(harness.configPath);
@@ -1006,7 +1011,7 @@ test("interactive install choice happens before JSONC confirmation and filters s
     validator: { code: 0 },
   });
 
-  const result = await runCli(harness.env, ["3\n", "y\n"], ["--rules-default"], 12000);
+  const result = await runCli(harness.env, ["3\n", "n\n"], ["--rules-default"], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1016,11 +1021,16 @@ test("interactive install choice happens before JSONC confirmation and filters s
   assert.match(result.stdout, /3\) No to all/);
   const installPrompt = result.stdout.indexOf("Install recommended local models before writing JSONC");
   const preview = result.stdout.indexOf("Recommended provider/model configurations for");
-  const applyPrompt = result.stdout.indexOf("Apply these JSONC changes? (y/N)");
+  const applyTarget = result.stdout.indexOf("Apply target:");
+  const applyPrompt = result.stdout.indexOf("Apply these JSONC changes? (Y/n)");
   assert.ok(installPrompt >= 0 && preview > installPrompt && applyPrompt > preview);
+  assert.ok(applyTarget > preview && applyPrompt > applyTarget);
   const finalPreview = result.stdout.slice(preview, applyPrompt);
   assert.doesNotMatch(finalPreview, /local\/deepseek-r1:8b/);
+  assert.match(finalPreview, new RegExp(`Apply target: ${escapeRegExp(harness.configPath)}`));
+  assert.match(finalPreview, new RegExp(`Backup before writing: ${escapeRegExp(`${harness.configPath}.pre-rebalance`)}`));
   assert.doesNotMatch(result.stdout.slice(applyPrompt), /Install deepseek-r1:8b/);
+  assert.match(result.stdout.slice(applyPrompt), /Skipped\./);
   const written = readConfig(harness.configPath);
   assert.equal(written.agents.sisyphus.model, "opencode/big-pickle");
   assert.doesNotMatch(JSON.stringify(written.agents.sisyphus), /local\/deepseek-r1:8b/);
@@ -1158,6 +1168,9 @@ test("interactive orphan uninstall apply exits after Done without SIGINT", async
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Remove local models deemed unnecessary\? \[Y\/n\]/);
+  assert.match(result.stdout, /Apply these JSONC changes\? \(Y\/n\)/);
+  assert.match(result.stdout, new RegExp(`Apply target: ${escapeRegExp(harness.configPath)}`));
+  assert.match(result.stdout, new RegExp(`Backup before writing: ${escapeRegExp(`${harness.configPath}.pre-rebalance`)}`));
   assert.match(result.stdout, /removed orphan:1b/);
   assert.match(result.stdout, /\u2705 Done\./);
 });

@@ -20,12 +20,12 @@ $ npx omo-recommend-models --cloud-only --yes
 │
 ◇  Discovering local model catalog: skipped by --cloud-only
 │
-✓ Loaded: 5 providers from ~/.cache/oh-my-opencode/provider-models.json
+◇  Loaded: 5 providers from ~/.cache/oh-my-opencode/provider-models.json
 │  Filtered against live models (via `opencode models --pure`) to prevent stale entries
 │
-◇  📊 AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
-│  - https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
-│  - https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/category-model-requirements.ts
+◇  AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
+│  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
+│  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/category-model-requirements.ts
 │
 ◇  Recommended provider/model configurations for ~/.opencode/oh-my-openagent.jsonc:
 │  • agents.sisyphus

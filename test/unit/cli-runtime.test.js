@@ -12,13 +12,12 @@ test("createCliRuntime owns context and subprocess runner", () => {
   assert.equal(runtime.ctx.debugMode, false);
 });
 
-test("configureTerminalUi leaves prompts disabled when false", async () => {
+test("configureTerminalUi is a no-op plain prompt hook", async () => {
   const runtime = createCliRuntime();
 
-  await runtime.configureTerminalUi(false);
+  await runtime.configureTerminalUi(true);
 
-  assert.equal(runtime.ctx.useClackPrompts, false);
-  assert.equal(runtime.ctx.clack, null);
+  assert.equal(runtime.ctx.debugMode, false);
 });
 
 test("handleFatalError sets failure exit code and hides stack unless debug is enabled", (t) => {
@@ -38,7 +37,7 @@ test("handleFatalError sets failure exit code and hides stack unless debug is en
 
   assert.equal(process.exitCode, 1);
   assert.match(lines.join("\n"), /bad input/);
-  assert.doesNotMatch(lines.join("\n"), /Error: bad input/);
+  assert.doesNotMatch(lines.join("\n"), /\n\s+at /);
 });
 
 test("handleFatalError prints stack when debug is enabled", (t) => {

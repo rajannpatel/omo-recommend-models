@@ -1,6 +1,6 @@
 {
   "name": "omo-recommend-models",
-  "version": "1.7.8",
+  "version": "1.7.9",
   "description": "Deterministic model recommendation CLI for OpenCode OMO agent configurations",
   "type": "module",
   "bin": {
@@ -42,12 +42,6 @@
     "test": "node --test",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint 'bin/*' 'lib/**/*.js'",
     "pack:check": "npm pack --dry-run"
-  },
-  "dependencies": {
-    "@clack/prompts": "^0.7.0",
-    "ajv": "^8.20.0",
-    "commander": "^12.1.0",
-    "picocolors": "^1.0.1"
   },
   "devDependencies": {
     "eslint": "^8.57.1"

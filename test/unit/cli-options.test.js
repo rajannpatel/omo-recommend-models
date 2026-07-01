@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -15,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const packageJson = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf8"),
 );
+const repoRoot = path.resolve(__dirname, "..", "..");
 
 test("parseCliOptions maps aliases and repeated panel models", () => {
   const result = parseCliOptions([
@@ -64,9 +66,40 @@ test("parseCliOptions exposes help and version flags without exiting", () => {
   assert.match(usage(), /^Usage: omo-recommend-models \[options\]/);
 });
 
+test("parseCliOptions supports inline values and debug flag", () => {
+  const result = parseCliOptions([
+    "--model=opencode/one",
+    "--exclude-model=provider/two",
+    "--debug",
+  ]);
+
+  assert.deepEqual(result.model, ["opencode/one"]);
+  assert.deepEqual(result["exclude-model"], ["provider/two"]);
+  assert.equal(result.debug, true);
+});
+
 test("parseCliOptions throws for unknown options without exiting", () => {
   assert.throws(
     () => parseCliOptions(["--unknown-option"]),
     /unknown option '--unknown-option'/,
   );
+});
+
+test("recommend bin version runs without installed third-party modules", (t) => {
+  let output;
+  try {
+    output = execFileSync(
+      process.execPath,
+      [path.join(repoRoot, packageJson.bin["omo-recommend-models"]), "--version"],
+      { cwd: "/tmp", encoding: "utf8" },
+    );
+  } catch (error) {
+    if (error.code === "EPERM") {
+      t.skip("child process execution is blocked in this test sandbox");
+      return;
+    }
+    throw error;
+  }
+
+  assert.equal(output.trim(), CLI_VERSION);
 });

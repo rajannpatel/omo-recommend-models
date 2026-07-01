@@ -6,8 +6,6 @@ test("RuntimeContext constructor initializes all fields", () => {
   const ctx = new RuntimeContext();
   assert.ok(ctx.activeChildren instanceof Set);
   assert.equal(ctx.activeChildren.size, 0);
-  assert.equal(ctx.clack, null);
-  assert.equal(ctx.useClackPrompts, false);
   assert.equal(ctx.debugMode, false);
   assert.ok(ctx.abortController instanceof AbortController);
   assert.equal(ctx.cachedAgyPanelModel, undefined);
