@@ -188,3 +188,50 @@ test("createRuleBasedRecommendations resolves provider-local model spelling vari
     ],
   );
 });
+
+test("createRuleBasedRecommendations accepts github-copilot gpt-5.5 for multimodal-looker", () => {
+  const config = {
+    agents: {
+      "multimodal-looker": { description: "vision agent" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "github-copilot": ["gpt-5.5"],
+    }),
+  });
+
+  const rec = result.cloudRecommendations[0];
+  assert.doesNotMatch(result.analysis, /No available rule-chain models/);
+  assert.equal(rec.model.provider, "github-copilot");
+  assert.equal(rec.model.model, "gpt-5.5");
+  assert.equal(
+    rec.model.reason,
+    "Rule chain priority 1 (live equivalent inferred from rule corpus)",
+  );
+});
+
+test("createRuleBasedRecommendations does not infer arbitrary same-name providers", () => {
+  const config = {
+    agents: {
+      "multimodal-looker": { description: "vision agent" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "unknown-paid": ["gpt-5.5"],
+    }),
+  });
+
+  const rec = result.cloudRecommendations[0];
+  assert.match(result.analysis, /No available rule-chain models for: multimodal-looker/);
+  assert.equal(rec.model.provider, "unknown-paid");
+  assert.equal(rec.model.model, "gpt-5.5");
+  assert.equal(rec.model.reason, "Best available paid model outside upstream rule chain");
+});
