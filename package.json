@@ -1,10 +1,17 @@
 {
   "name": "omo-recommend-models",
   "version": "1.6.1",
-  "description": "Consolidated AI-powered model recommendation CLI for OpenCode OMO agent configurations",
+  "description": "Deterministic model recommendation CLI for OpenCode OMO agent configurations",
   "type": "module",
   "bin": {
-    "omo-recommend-models": "./bin/omo-recommend-models"
+    "omo-recommend-models": "./bin/omo-recommend-models",
+    "omo-validate-config": "./bin/omo-validate-config"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./cli/recommend-models": "./lib/cli/recommend-models.js",
+    "./cli/validate-config": "./lib/cli/validate-config.js",
+    "./package.json": "./package.json"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -14,14 +21,27 @@
     "type": "git",
     "url": "git+https://github.com/rajannpatel/omo-recommend-models.git"
   },
+  "bugs": {
+    "url": "https://github.com/rajannpatel/omo-recommend-models/issues"
+  },
+  "homepage": "https://github.com/rajannpatel/omo-recommend-models#readme",
+  "keywords": [
+    "opencode",
+    "oh-my-openagent",
+    "omo",
+    "model-routing",
+    "cli"
+  ],
   "files": [
     "bin/omo-recommend-models",
     "bin/omo-validate-config",
-    "lib"
+    "lib",
+    "README.md"
   ],
   "scripts": {
     "test": "node --test",
-    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint 'bin/*' 'lib/**/*.js'"
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint 'bin/*' 'lib/**/*.js'",
+    "pack:check": "npm pack --dry-run"
   },
   "dependencies": {
     "@clack/prompts": "^0.7.0",

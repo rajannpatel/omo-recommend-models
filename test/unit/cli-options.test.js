@@ -1,11 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   CLI_VERSION,
   parseCliOptions,
   usage,
 } from "../../lib/cli-options.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const packageJson = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf8"),
+);
 
 test("parseCliOptions maps aliases and repeated panel models", () => {
   const result = parseCliOptions([
@@ -51,7 +60,7 @@ test("parseCliOptions preserves negated option intent", () => {
 test("parseCliOptions exposes help and version flags without exiting", () => {
   assert.equal(parseCliOptions(["--help"]).help, true);
   assert.equal(parseCliOptions(["-v"]).version, true);
-  assert.equal(CLI_VERSION, "1.2.3");
+  assert.equal(CLI_VERSION, packageJson.version);
   assert.match(usage(), /^Usage: omo-recommend-models \[options\]/);
 });
 
