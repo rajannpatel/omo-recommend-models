@@ -401,6 +401,61 @@ function runCliRaw(env, input = "", args = ["--dry-run", "--cloud-only"], timeou
   });
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function runCliTtyUntilPrompt(env, inputChunks, args, promptPattern, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const command = [process.execPath, scriptPath, ...args].map(shellQuote).join(" ");
+    const child = spawn("/usr/bin/script", ["-qfec", command, "/dev/null"], {
+      cwd: env.HOME,
+      env: { ...process.env, ...env },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+    let sawPrompt = false;
+    let promptTimer = null;
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (promptTimer) clearTimeout(promptTimer);
+      if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
+      resolve({ stdout, stderr, ...result });
+    };
+    const timer = setTimeout(() => {
+      finish({ timedOut: true, closedBeforePromptSettled: false });
+    }, timeoutMs);
+    child.stdout.on("data", (data) => {
+      stdout += data.toString();
+      if (!sawPrompt && promptPattern.test(stdout)) {
+        sawPrompt = true;
+        promptTimer = setTimeout(() => {
+          finish({ timedOut: false, closedBeforePromptSettled: false });
+        }, 300);
+      }
+    });
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      finish({
+        code,
+        signal,
+        timedOut: false,
+        closedBeforePromptSettled: sawPrompt,
+      });
+    });
+    inputChunks.forEach((chunk, index) => {
+      setTimeout(() => child.stdin.write(chunk), index * 100);
+    });
+  });
+}
+
 function runValidator(env, args = [], timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [validatorPath, ...args], {
@@ -928,6 +983,42 @@ test("interactive install choice happens before JSONC confirmation and filters s
   const written = readConfig(harness.configPath);
   assert.equal(written.agents.sisyphus.model, "opencode/big-pickle");
   assert.doesNotMatch(JSON.stringify(written.agents.sisyphus), /local\/deepseek-r1:8b/);
+});
+
+test("interactive install choice two waits for each missing local model in a TTY", async (t) => {
+  if (!fs.existsSync("/usr/bin/script")) {
+    t.skip("script(1) is required for pseudo-TTY coverage");
+    return;
+  }
+  const harness = createHarness(t, {
+    config: defaultConfig({ sisyphus: { model: "opencode/big-pickle" } }),
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 32000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
+    gpu: { name: "Rule GPU", vramGb: 24 },
+    localCatalog: [
+      { name: "deepseek-r1:8b", size: "6.3 GB", vram: 6.3, score: 10, baseModel: "deepseek-r1", tag: "8b" },
+    ],
+    ollamaModels: [],
+    validator: { code: 0 },
+  });
+
+  const result = await runCliTtyUntilPrompt(
+    harness.env,
+    ["2\n"],
+    ["--interactive"],
+    /Install deepseek-r1:8b\? \[y\/N\]/,
+    12000,
+  );
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.match(result.stdout, /Install deepseek-r1:8b\? \[y\/N\]/);
+  assert.equal(result.closedBeforePromptSettled, false, result.stdout);
 });
 
 test("installed local tie-break writes canonical local fallback last without routing", async (t) => {
