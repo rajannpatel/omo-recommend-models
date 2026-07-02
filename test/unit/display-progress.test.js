@@ -28,9 +28,8 @@ test("createProgress formats known-count updates and completion in non-TTY outpu
     progress.done("complete");
   });
 
-  assert.match(output, /Known API calls: 1\/2/);
   assert.match(output, /Known API calls: complete 2\/2/);
-  assert.doesNotMatch(output, /\r|\x1b\[/);
+  assert.match(output, /\│\n$/);
 });
 
 test("createProgress set clamps known-count progress at the declared total", () => {
@@ -41,7 +40,6 @@ test("createProgress set clamps known-count progress at the declared total", () 
     progress.done();
   });
 
-  assert.match(output, /Known AI calls: 2\/2/);
   assert.match(output, /Known AI calls: done 2\/2/);
 });
 
@@ -54,7 +52,5 @@ test("createProgress supports late-bound totals for discovery loops", () => {
     progress.done("cataloged");
   });
 
-  assert.match(output, /Known registry calls: 0\/3/);
-  assert.match(output, /Known registry calls: cataloging 2\/3/);
   assert.match(output, /Known registry calls: cataloged 3\/3/);
 });

@@ -18,11 +18,11 @@ test("formatAiAnalysis preserves provider groups inside unresolved rule chains",
 
   assert.match(
     formatted,
-    /◦ visual-engineering:\s*\n\s*sorted in \(AI Provider\)\/Model preference:\s*\n\s*1\.\s*\(google, github-copilot, opencode, vercel\)\/gemini-3\.1-pro\s*\n\s*2\.\s*\(opencode-go, vercel\)\/glm-5\.1\)/,
+    /◦ visual-engineering:\s*\n\s*1\.\s*\(google, github-copilot, opencode, vercel\)\/gemini-3\.1-pro\s*\n\s*2\.\s*\(opencode-go, vercel\)\/glm-5\.1\)/,
   );
   assert.match(
     formatted,
-    /◦ writing:\s*\n\s*sorted in \(AI Provider\)\/Model preference:\s*\n\s*1\.\s*\(google, github-copilot, opencode, vercel\)\/gemini-3-flash\s*\n\s*2\.\s*\(opencode-go, vercel\)\/kimi-k2\.6\)/,
+    /◦ writing:\s*\n\s*1\.\s*\(google, github-copilot, opencode, vercel\)\/gemini-3-flash\s*\n\s*2\.\s*\(opencode-go, vercel\)\/kimi-k2\.6\)/,
   );
   assert.doesNotMatch(formatted, /\n  • github-copilot/);
   assert.doesNotMatch(formatted, /\n  • opencode/);

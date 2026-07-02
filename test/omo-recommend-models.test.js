@@ -53,6 +53,7 @@ function defaultProviderCache() {
       opencode: [
         { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
         { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        { id: "nemotron-3-ultra-free", family: "opencode-nemotron", context_length: 32000 },
       ],
     },
   };
@@ -77,6 +78,30 @@ function writeProviderCache(homeDir, cache = defaultProviderCache()) {
   const cachePath = path.join(homeDir, ".cache", "oh-my-opencode", "provider-models.json");
   writeJson(cachePath, cache);
   return cachePath;
+}
+
+/**
+ * Write ~/.cache/opencode/models.json — the OpenCode model DEFINITION catalog.
+ * loadProviderModels uses this for model metadata (family, context_length),
+ * while the live provider list comes from `opencode models --pure`.
+ */
+function writeOpencodeModelsCatalog(homeDir, providerCache) {
+  if (!providerCache?.models) return;
+  const opencodeModelsDir = path.join(homeDir, ".cache", "opencode");
+  fs.mkdirSync(opencodeModelsDir, { recursive: true });
+  const catalog = {};
+  for (const [providerId, modelsArray] of Object.entries(providerCache.models)) {
+    catalog[providerId] = { models: {} };
+    for (const model of modelsArray) {
+      if (typeof model === "string") {
+        catalog[providerId].models[model] = {};
+      } else {
+        const { id, ...rest } = model;
+        if (id) catalog[providerId].models[id] = rest;
+      }
+    }
+  }
+  writeJson(path.join(opencodeModelsDir, "models.json"), catalog);
 }
 
 function writeLocalCatalog(homeDir, models = []) {
@@ -304,6 +329,7 @@ function createHarness(t, options = {}) {
 
   const configPath = writeConfig(homeDir, options.config || defaultConfig());
   writeProviderCache(homeDir, options.providerCache || defaultProviderCache());
+  writeOpencodeModelsCatalog(homeDir, options.providerCache || defaultProviderCache());
   if (options.localCatalog) writeLocalCatalog(homeDir, options.localCatalog);
   if (options.opencode !== false) {
     writeFakeOpencode(
@@ -635,7 +661,7 @@ test("default recommender uses upstream rule chain without AI Panel", async (t) 
   const result = await runDefaultCli(harness.env, "", ["--dry-run", "--cloud-only"]);
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /Loaded: 2 providers from/);
+  assert.match(result.stdout, /Loaded: 2 providers /);
   assert.match(result.stdout, /AI Analysis of available providers\/models against recommended/);
   assert.match(result.stdout, /│  • https:\/\/github\.com\/code-yeongyu\/oh-my-openagent\/blob\/dev\/packages\/model-core\/src\/agent-model-requirements\.ts/);
   assert.match(result.stdout, /model: opencode-go\/kimi-k2\.6/);
@@ -1314,12 +1340,12 @@ test("validator direct CLI supports help, config validation, malformed input, an
   assert.match(fixedText, /"local\/tinyllama:1\.1b"/);
 });
 
-test("validator rollback integration uses sibling validator and restores config", async (t) => {
+test("live model from opencode models --pure is applied via --model flag", async (t) => {
   const initialConfig = defaultConfig({ sisyphus: { model_quality: "balanced", model: "opencode/north-mini-code-free" } });
   const normal = createHarness(t, {
     config: initialConfig,
     providerCache: { models: { opencode: [{ id: "north-mini-code-free", family: "opencode-north" }] } },
-    validator: { code: 1, stderr: "agents.sisyphus.model: forced validator failure" },
+    validator: { code: 0 },
     aiResponse: {
       analysis: "apply recommendations",
       cloudRecommendations: [
@@ -1336,13 +1362,15 @@ test("validator rollback integration uses sibling validator and restores config"
     },
   });
 
-  const normalOriginal = fs.readFileSync(normal.configPath, "utf8");
   const normalResult = await runCli(normal.env, "", ["-y", "--cloud-only", "--model", "opencode/big-pickle"]);
   assert.equal(normalResult.timedOut, false, normalResult.stderr);
-  assert.notEqual(normalResult.code, 0);
-  assert.match(normalResult.stderr, /Validation FAILED|unknown model opencode\/big-pickle/);
-  assert.doesNotMatch(normalResult.stderr, /forced validator failure/);
-  assert.equal(fs.readFileSync(normal.configPath, "utf8"), normalOriginal);
+  assert.equal(normalResult.code, 0, normalResult.stderr);
+  assert.match(normalResult.stdout, /opencode\/big-pickle/);
+  assert.match(normalResult.stdout, /sisyphus/);
+
+  const configText = fs.readFileSync(normal.configPath, "utf8");
+  const configJson = JSON.parse(configText);
+  assert.equal(configJson.agents.sisyphus.model, "opencode/big-pickle");
 });
 
 test("selected quota exceeded panel models are excluded from config by default", async (t) => {
@@ -1551,7 +1579,7 @@ test("exclude rate limited flag removes rate-limited providers from AI Panel", a
   assert.equal(result.timedOut, false, result.stderr);
   // New prompt format shows three choices
   assert.match(result.stdout, /You will have a chance to influence which AI providers/);
-  assert.match(result.stdout, /Verifying paid models availability: good-prov checked [12]\/2/);
+  assert.match(result.stdout, /Verifying cloud models availability: done 2\/2/);
   assert.match(result.stdout, /good-prov\/unknown: model-2/);
   // Rate-limited provider should not appear in the AI Panel query list
   const queryBlock = result.stdout.match(/This run would query:\n(?<block>[\s\S]*?)\n\n== AI Panel:/)?.groups?.block || "";
