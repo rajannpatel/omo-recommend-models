@@ -335,8 +335,8 @@ function createHarness(t, options = {}) {
 }
 
 function runCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
-  const finalArgs = args.filter((arg) => arg !== "--rules-default");
-  if (!args.includes("--rules-default") && !finalArgs.includes("--ai-panel")) {
+  const finalArgs = [...args];
+  if (!finalArgs.includes("--ai-panel")) {
     finalArgs.push("--ai-panel");
   }
   if (!finalArgs.includes("-y") && !finalArgs.includes("--interactive")) {
@@ -374,6 +374,14 @@ function runCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs
       child.stdin.end(input);
     }
   });
+}
+
+function runDefaultCli(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
+  const finalArgs = [...args];
+  if (!finalArgs.includes("-y") && !finalArgs.includes("--interactive")) {
+    finalArgs.push("--interactive");
+  }
+  return runCliRaw(env, input, finalArgs, timeoutMs);
 }
 
 function runCliRaw(env, input = "", args = ["--dry-run", "--cloud-only"], timeoutMs = 8000) {
@@ -530,14 +538,22 @@ function readConfig(configPath) {
   return JSON.parse(fs.readFileSync(configPath, "utf8"));
 }
 
-test("captured recommendation output fixture is a JSON array of records", () => {
-  const fixturePath = path.join(repoRoot, "bin", "recommendation-output.json");
-  const parsed = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-  assert.ok(Array.isArray(parsed), "fixture should be a JSON array");
-  assert.ok(parsed.length > 0, "fixture should contain recommendation entries");
-  assert.equal(typeof parsed[0], "object");
-  assert.ok(parsed[0] && typeof parsed[0].name === "string");
-  assert.ok(parsed[0] && typeof parsed[0].type === "string");
+test("recommendation CLI exposes the current dry-run contract without generated bin fixtures", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig(),
+    providerCache: {
+      models: {
+        opencode: [{ id: "big-pickle", family: "glm", context_length: 200000 }],
+      },
+    },
+  });
+
+  const result = await runDefaultCli(harness.env, "", ["--dry-run", "--cloud-only"]);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Recommended provider\/model configurations for/);
+  assert.doesNotMatch(result.stdout + result.stderr, /recommendation-output\.json/);
 });
 
 test("missing opencode exits early with actionable dependency error", async (t) => {
@@ -616,7 +632,7 @@ test("default recommender uses upstream rule chain without AI Panel", async (t) 
     },
   });
 
-  const result = await runCli(harness.env, "", ["--rules-default", "--dry-run", "--cloud-only"]);
+  const result = await runDefaultCli(harness.env, "", ["--dry-run", "--cloud-only"]);
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Loaded: 2 providers from/);
@@ -639,10 +655,10 @@ test("default recommender strips manually excluded quota models", async (t) => {
     },
   });
 
-  const result = await runCli(
+  const result = await runDefaultCli(
     harness.env,
     "",
-    ["--rules-default", "--dry-run", "--cloud-only", "--exclude-model", "opencode-go/kimi-k2.6"],
+    ["--dry-run", "--cloud-only", "--exclude-model", "opencode-go/kimi-k2.6"],
   );
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -677,10 +693,10 @@ test("default recommender does not assign paid model refs that fail verification
   });
 
   // When: the deterministic rules recommender verifies paid providers first.
-  const result = await runCli(
+  const result = await runDefaultCli(
     harness.env,
     "",
-    ["--rules-default", "--dry-run", "--cloud-only"],
+    ["--dry-run", "--cloud-only"],
   );
 
   // Then: the failed model ref is never written as primary or fallback output.
@@ -712,10 +728,10 @@ test("default recommender blocks failed opencode model while keeping same model 
     },
   });
 
-  const result = await runCli(
+  const result = await runDefaultCli(
     harness.env,
     "",
-    ["--rules-default", "--dry-run", "--cloud-only"],
+    ["--dry-run", "--cloud-only"],
   );
 
   assert.equal(result.timedOut, false, result.stderr);
@@ -1026,7 +1042,7 @@ test("default rule matcher appends dynamic installed local fallback last", async
     validator: { code: 0 },
   });
 
-  const result = await runCli(harness.env, "", ["--rules-default", "-y"]);
+  const result = await runDefaultCli(harness.env, "", ["-y"]);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1056,7 +1072,7 @@ test("interactive install choice happens before JSONC confirmation and filters s
     validator: { code: 0 },
   });
 
-  const result = await runCli(harness.env, ["3\n", "n\n"], ["--rules-default"], 12000);
+  const result = await runDefaultCli(harness.env, ["3\n", "n\n"], ["--interactive"], 12000);
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
@@ -1073,7 +1089,7 @@ test("interactive install choice happens before JSONC confirmation and filters s
   const finalPreview = result.stdout.slice(preview, applyPrompt);
   assert.doesNotMatch(finalPreview, /local\/deepseek-r1:8b/);
   assert.match(finalPreview, new RegExp(`Apply target: ${escapeRegExp(harness.configPath)}`));
-  assert.match(finalPreview, new RegExp(`Backup before writing: ${escapeRegExp(`${harness.configPath}.pre-rebalance`)}`));
+  assert.match(finalPreview, new RegExp(`Backup before writing: ${escapeRegExp(`${harness.configPath}.pre-recommend`)}`));
   assert.doesNotMatch(result.stdout.slice(applyPrompt), /Install deepseek-r1:8b/);
   assert.match(result.stdout.slice(applyPrompt), /Skipped\./);
   const written = readConfig(harness.configPath);
@@ -1215,7 +1231,7 @@ test("interactive orphan uninstall apply exits after Done without SIGINT", async
   assert.match(result.stdout, /Remove local models deemed unnecessary\? \[Y\/n\]/);
   assert.match(result.stdout, /Apply these JSONC changes\? \(Y\/n\)/);
   assert.match(result.stdout, new RegExp(`Apply target: ${escapeRegExp(harness.configPath)}`));
-  assert.match(result.stdout, new RegExp(`Backup before writing: ${escapeRegExp(`${harness.configPath}.pre-rebalance`)}`));
+  assert.match(result.stdout, new RegExp(`Backup before writing: ${escapeRegExp(`${harness.configPath}.pre-recommend`)}`));
   assert.match(result.stdout, /removed orphan:1b/);
   assert.match(result.stdout, /\u2705 Done\./);
 });

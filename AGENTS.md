@@ -41,6 +41,7 @@ omo-recommend/
 | Recommendation normalization | `lib/recommend/recommendation-finalizer.js` | Filters unusable refs, fills provider fallbacks, adds fitting local fallback. |
 | Config writes and validation | `lib/recommend/apply.js`, `lib/recommend/apply-recommendations.js` | Manages backups, mutation, validation, and rollback on validation failures. |
 | Integration harness | `test/omo-recommend-models.test.js` | Fakes `opencode`, `ollama`, `codex`, `agy`, and GPU commands. |
+| Test placement guidance | `test/README.md` | Explains unit vs integration tests, fixture placement, and model availability coverage expectations. |
 
 ## CONVENTIONS
 - Runtime is Node.js with ES Modules (ESM). All imports must use explicit `.js` extensions.
@@ -50,6 +51,7 @@ omo-recommend/
 - Non-interactive/non-TTY execution defaults to dry-run mode, printing proposed updates without applying unless `--yes` or `-y` is passed.
 - Built-in upstream model matching follows `packages/model-core/src/agent-model-requirements.ts` and `packages/model-core/src/category-model-requirements.ts` from `code-yeongyu/oh-my-openagent` `dev`.
 - Free OpenCode models are allowed in config by default. Use `--exclude-free` or `--no-free-config` only when the user explicitly wants them removed.
+- Provider availability is not enough for assignment. Advertised model refs must be probed; reject only the failing `provider/model` ref while keeping other available refs from that provider eligible.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not write `routing` into `oh-my-openagent.jsonc`; the upstream schema allows `model` and `fallback_models`, not `routing`.
@@ -62,11 +64,11 @@ omo-recommend/
 ## COMMANDS
 ```bash
 node ./bin/omo-recommend-models --dry-run --cloud-only
-node ./bin/omo-recommend-models --rebalance --yes
+node ./bin/omo-recommend-models --yes
 npm test
 ```
 
 ## NOTES
-- The test harness is configured in `test/omo-recommend-models.test.js` and runs via `npm test` using Node's built-in `node:test`.
+- The test harness is configured in `test/omo-recommend-models.test.js`; focused unit tests live under `test/unit/`. See `test/README.md` before adding coverage. All tests run via `npm test` using Node's built-in `node:test`.
 - `.codegraph` is a local symlink for indexed navigation and is excluded from git.
 - Keep any temporary debug files out of the repo; use `/tmp` or `.git/info/exclude` for local-only artifacts.

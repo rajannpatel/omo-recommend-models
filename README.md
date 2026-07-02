@@ -75,7 +75,6 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 |------|---------|-------------|
 | `--yes`, `-y` | `false` | Apply all recommendations without interactive confirmation. Required for non-interactive/CI environments to proceed past preview. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
-| `--rebalance` | `false` | Run in algorithmic rebalance mode. Skips the AI panel entirely and restructures existing `model` and `fallback_models` assignments around score-based tier chains. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
 | `--model <ref>` | — | Specify an explicit AI panel model reference. Repeatable: `--model prov/model1 --model prov/model2`. |
@@ -90,7 +89,6 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 | `--no-install` | `true` (install enabled) | Skip pulling/installing recommended local Ollama models. Useful for preview-only runs or when you manage models separately. |
 | `--no-uninstall` | `true` (uninstall enabled) | Skip removing conflicting or superseded local Ollama models. |
 | `--no-remove-orphans` | `true` (orphan removal enabled) | Skip pruning Ollama models that the AI never evaluated or recommended. |
-| `--no-rebalance-apply` | `false` | Do not write restructuring changes in rebalance mode. Only applies when `--rebalance` is active. |
 | `--no-apply` | `true` (apply enabled) | Do not write any final recommendations to the JSONC config file. Shows what would change without modifying anything. |
 
 ### Informational Flags
@@ -130,7 +128,7 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
     Detects your GPU and Ollama catalog, estimates each local model's weight plus KV-cache cost, and recommends only models that fit the active role and the available VRAM budget. Local recommendations are computed from metadata and hardware facts, not a hand-curated static table.
 * **Cloud cost, context, and availability comparisons** 
 
-    Provides a quick, point-in-time stack-rank of models from AI cloud providers you have authenticated in opencode (via `opencode auth login`), then removes providers that are currently rate-limited, quota-blocked, or otherwise unavailable.
+    Provides a quick, point-in-time stack-rank of models from AI cloud providers you have authenticated in opencode (via `opencode auth login`), then removes providers that are currently rate-limited, quota-blocked, or otherwise unavailable. Advertised model refs are also probed before assignment; a provider can stay eligible while one unavailable model from that provider is rejected.
 * **Initial template generation** 
 
     Writes a baseline `oh-my-openagent.jsonc` file with valid syntax, canonical `provider/model` references, cloud fallbacks, and local fallbacks when they are confirmed installed or explicitly installed during the run.
@@ -239,5 +237,3 @@ By default, the CLI starts from upstream `rules(model-core)` fallback chains. Wi
 5. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
 6. Deduplicates `fallback_models`, removes anything that duplicates the primary model, and orders local fallbacks last after cloud fallbacks.
 7. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
-
-In `--rebalance` mode, the AI panel is skipped. The CLI instead builds tier chains directly from model scores and restructures existing `model` plus `fallback_models` assignments around those score tiers.
