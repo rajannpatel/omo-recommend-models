@@ -1,0 +1,216 @@
+#!/usr/bin/env node
+
+import fs from "node:fs";
+import path from "node:path";
+import { get } from "node:https";
+
+// Simple argument parsing
+const args = process.argv.slice(2);
+let outputPath = "lib/recommend/model-requirements.js";
+let branch = "dev";
+let dryRun = false;
+let help = false;
+
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if (arg === "--help" || arg === "-h") {
+    help = true;
+  } else if (arg === "--output" && i + 1 < args.length) {
+    outputPath = args[++i];
+  } else if (arg === "--branch" && i + 1 < args.length) {
+    branch = args[++i];
+  } else if (arg === "--dry-run") {
+    dryRun = true;
+  } else if (arg === "--version" || arg === "-v") {
+    console.log("omo-sync-upstream v1.0.0");
+    process.exit(0);
+  } else {
+    console.error(`Unknown argument: ${arg}`);
+    help = true;
+  }
+}
+
+if (help) {
+  console.log(`Usage: omo-sync-upstream [options]
+
+Options:
+  --output <path>      Output file path (default: lib/recommend/model-requirements.js)
+  --branch <name>      Upstream branch to fetch from (default: dev)
+  --dry-run            Print to stdout instead of writing to file
+  --help, -h           Show this help message
+  --version, -v        Show version
+
+Examples:
+  omo-sync-upstream --dry-run
+  omo-sync-upstream --output ./custom/path.js
+  omo-sync-upstream --branch main --yes
+`);
+  process.exit(0);
+}
+
+const upstreamRepo = "code-yeongyu/oh-my-openagent";
+const baseUrl = `https://raw.githubusercontent.com/${upstreamRepo}/${branch}/packages/model-core/src/`;
+
+async function fetchUrl(url) {
+  return new Promise((resolve, reject) => {
+    get(url, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          resolve(data);
+        } else {
+          reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+        }
+      });
+      res.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
+function extractObjectFromTs(content, exportName) {
+  // Match: export const X = { ... } or export const X: Type = { ... }
+  // Use a simpler but more robust approach: find the export line, then
+  // count braces to extract the full object literal.
+  const startPattern = new RegExp(
+    `export\\s+const\\s+${exportName}\\s*(?::\\s*[^=]+?)?\\s*=\\s*\\{`,
+    "s",
+  );
+  const startMatch = content.match(startPattern);
+  if (!startMatch) {
+    // Try without type annotation in multiline context
+    const altPattern = new RegExp(
+      `export\\s+const\\s+${exportName}\\s*=\\s*\\{`,
+    );
+    const altMatch = content.match(altPattern);
+    if (!altMatch) {
+      throw new Error(
+        `Could not find export const ${exportName} in upstream file`,
+      );
+    }
+    throw new Error(
+      `Found export const ${exportName} but could not determine object body location`,
+    );
+  }
+
+  const startIndex = startMatch.index + startMatch[0].length - 1; // position of the opening {
+  let depth = 1;
+  let i = startIndex + 1;
+  while (i < content.length && depth > 0) {
+    if (content[i] === "{") depth++;
+    else if (content[i] === "}") depth--;
+    i++;
+  }
+  if (depth !== 0) {
+    throw new Error(
+      `Unbalanced braces for ${exportName} (depth=${depth} at end)`,
+    );
+  }
+
+  return content.slice(startIndex, i);
+}
+
+function stripTypeScriptSyntax(objStr) {
+  // Remove TypeScript-specific syntax to produce valid JS
+  let cleaned = objStr;
+
+  // Remove type annotations like : Record<string, ModelRequirement>
+  // but NOT inside string literals
+  cleaned = cleaned.replace(/:\s*Record\s*<[^>]+>/g, ":");
+  cleaned = cleaned.replace(/:\s*ModelRequirement(?![\s\S]*?[}\]"'`])/g, ":");
+  // Remove inline type annotations on properties
+  cleaned = cleaned.replace(/:\s*(string|number|boolean|string\[\]|number\[\]|boolean\[\]|readonly\s*\([^)]+\))\s*(?=[,;\n}])/g, "");
+  
+  // Remove as const
+  cleaned = cleaned.replace(/\s+as\s+const/g, "");
+  
+  // Remove trailing commas in objects and arrays
+  cleaned = cleaned.replace(/,\s*}/g, "}");
+  cleaned = cleaned.replace(/,\s*\]/g, "]");
+  
+  // Remove `readonly` keywords
+  cleaned = cleaned.replace(/\breadonly\b\s*/g, "");
+  
+  return cleaned;
+}
+
+function hasFallbackChain(objStr) {
+  // Quick structure validation without JSON.parse
+  // Check that top-level keys exist and have fallbackChain arrays
+  const keyPattern = /^\s*["']?([\w-]+)["']?\s*:\s*\{/gm;
+  const keys = [];
+  let match;
+  while ((match = keyPattern.exec(objStr)) !== null) {
+    keys.push(match[1]);
+  }
+  if (keys.length === 0) return false;
+
+  // Verify at least some entries have fallbackChain
+  const fbcPattern = /\bfallbackChain\b\s*:/g;
+  const fbcMatch = objStr.match(fbcPattern);
+  return fbcMatch !== null && fbcMatch.length > 0;
+}
+
+async function main() {
+  try {
+    console.error("Fetching upstream model requirements...");
+    
+    const [agentContent, categoryContent] = await Promise.all([
+      fetchUrl(`${baseUrl}agent-model-requirements.ts`),
+      fetchUrl(`${baseUrl}category-model-requirements.ts`)
+    ]);
+    
+    // Extract objects from TypeScript files
+    const agentObjStr = extractObjectFromTs(agentContent, "AGENT_MODEL_REQUIREMENTS");
+    const categoryObjStr = extractObjectFromTs(categoryContent, "CATEGORY_MODEL_REQUIREMENTS");
+    
+    // Clean up TypeScript syntax to produce valid JS
+    const agentObjClean = stripTypeScriptSyntax(agentObjStr);
+    const categoryObjClean = stripTypeScriptSyntax(categoryObjStr);
+    
+    // Validate structure without JSON.parse (TS object literals aren't valid JSON)
+    if (!hasFallbackChain(agentObjClean)) {
+      throw new Error("Extracted AGENT_MODEL_REQUIREMENTS has no fallbackChain entries");
+    }
+    if (!hasFallbackChain(categoryObjClean)) {
+      throw new Error("Extracted CATEGORY_MODEL_REQUIREMENTS has no fallbackChain entries");
+    }
+    
+    // Count entries per section
+    const countKeys = (s) => {
+      const re = /^\s*["']?([\w-]+)["']?\s*:\s*\{/gm;
+      let c = 0;
+      while (re.exec(s)) c++;
+      return c;
+    };
+    const agentCount = countKeys(agentObjClean);
+    const categoryCount = countKeys(categoryObjClean);
+    
+    const output = `// Auto-generated by omo-sync-upstream
+// Source: ${upstreamRepo} ${branch} branch
+export const AGENT_MODEL_REQUIREMENTS = ${agentObjClean};
+export const CATEGORY_MODEL_REQUIREMENTS = ${categoryObjClean};
+`;
+    
+    if (dryRun) {
+      console.log(output);
+    } else {
+      // Ensure output directory exists
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      
+      fs.writeFileSync(outputPath, output, "utf8");
+      console.error(`✓ Updated ${outputPath} from upstream ${branch} (agent: ${agentCount} entries, category: ${categoryCount} entries)`);
+    }
+    
+  } catch (error) {
+    console.error(`Error: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+main();
