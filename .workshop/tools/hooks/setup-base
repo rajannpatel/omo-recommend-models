@@ -20,4 +20,5 @@ apt-get install -y \
   tree \
   yamllint \
   wget \
+  wl-clipboard \
   yq
