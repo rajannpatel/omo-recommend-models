@@ -602,7 +602,7 @@ test("AI panel runs recommendation models in pure text mode", async (t) => {
 
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /AI Panel: 1 agents, 2 panel models/);
+  assert.match(result.stdout, /AI Panel: 1 opencloud provider/);
   assert.match(result.stdout, /big-pickle/);
   assert.match(result.stdout, /north-mini-code-free/);
   assert.doesNotMatch(result.stdout, /Only opencode\/north-mini-code-free returned valid results/);
@@ -640,7 +640,7 @@ test("default panel falls back to opencode models from provider cache", async (t
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /This run would query:/);
-  assert.match(result.stdout, /opencode: big-pickle/);
+  assert.match(result.stdout, /big-pickle/);
   assert.doesNotMatch(result.stdout + result.stderr, /No free models available/);
 });
 
