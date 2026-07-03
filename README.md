@@ -17,18 +17,23 @@ Output:
 
 ```
 Need to install the following packages:
-omo-recommend-models@2.0.3
+omo-recommend-models@2.0.6
 Ok to proceed? (y) 
 
-✓  Checking GPU: skipped by --cloud-only
+◇  Verifying availability for 3 cloud provider(s) — this may take ~30s...
 │
-✓  Checking Ollama: skipped by --cloud-only
+◇  Checking GPU: NVIDIA GeForce RTX 3070 Ti Laptop GPU (8 GB VRAM) (0s)
 │
-✓  Discovering local model catalog: skipped by --cloud-only
+◇  Checking Ollama: 1 installed model(s) (0s)
 │
-◇  Loaded: 1 providers (live from `opencode models`) (2s)
+◇  Discovering local model catalog: 68 cached models (0s)
 │
-✓  Verifying cloud models availability: done 1/1 (2s)
+◇  Loaded: 3 providers (live from `opencode models`) (2s)
+│
+✓  Verifying cloud models availability: done 3/3 (30s)
+│
+◇  AI ranking 21 agent(s)/category(ies) by model fitness — this may take ~60s...
+✓  Ranking models by AI fitness: ranked by opencode/big-pickle 1/1 (75s)
 │
 ◇  AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
