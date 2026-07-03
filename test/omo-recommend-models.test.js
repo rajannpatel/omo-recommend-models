@@ -582,6 +582,23 @@ test("recommendation CLI exposes the current dry-run contract without generated 
   assert.doesNotMatch(result.stdout + result.stderr, /recommendation-output\.json/);
 });
 
+test("--global flag uses HOME config path in dry-run output", async (t) => {
+  const harness = createHarness(t, {
+    config: defaultConfig(),
+    providerCache: {
+      models: {
+        opencode: [{ id: "big-pickle", family: "glm", context_length: 200000 }],
+      },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["--dry-run", "--cloud-only", "--global"]);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /\/\.config\/opencode\/oh-my-openagent\.jsonc/);
+});
+
 test("missing opencode exits early with actionable dependency error", async (t) => {
   const harness = createHarness(t, { opencode: false });
 

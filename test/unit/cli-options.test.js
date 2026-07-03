@@ -78,6 +78,20 @@ test("parseCliOptions supports inline values and debug flag", () => {
   assert.equal(result.debug, true);
 });
 
+test("parseCliOptions parses --global flag", () => {
+  const result = parseCliOptions(["--global"]);
+  assert.equal(result.global, true);
+});
+
+test("parseCliOptions defaults global to false", () => {
+  const result = parseCliOptions(["-y"]);
+  assert.equal(result.global, false);
+});
+
+test("usage output includes --global flag", () => {
+  assert.match(usage(), /--global/);
+});
+
 test("parseCliOptions throws for unknown options without exiting", () => {
   assert.throws(
     () => parseCliOptions(["--unknown-option"]),

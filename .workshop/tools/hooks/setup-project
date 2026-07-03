@@ -3,10 +3,35 @@ set -euo pipefail
 
 cd /project
 
+npm i -g bun
+
 npx oh-my-openagent install --no-tui --claude=yes --gemini=yes --copilot=yes
+
+# this npx writes a project scoped config file: .opencode/oh-my-openagent.jsonc
+npx omo-recommend-models --cloud-only --yes
+
+sed -i.bak '/"[$]schema":/a \
+  "team_mode": {\
+    "enabled": true,\
+    // Optional defaults you can tweak:\
+    "max_parallel_members": 4,\
+    "max_members": 8,\
+    "tmux_visualization": false\
+  },\
+  "omo": {\
+    "model_fallback": true,\
+    "runtime_fallback": {\
+      "enabled": true,\
+      "retry_on_errors": [400, 429, 503, 529],\
+      "max_fallback_attempts": 3,\
+      "cooldown_seconds": 60,\
+      "notify_on_fallback": true\
+    }\
+  },' .opencode/oh-my-openagent.jsonc
 
 opencode plugin opencode-acp -g
 opencode plugin @ramtinj95/opencode-tokenscope -g
+
 mkdir -p ~/.config/opencode/command
 cat > ~/.config/opencode/command/tokenscope.md << 'EOF'
 ---
