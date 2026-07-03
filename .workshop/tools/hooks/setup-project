@@ -29,7 +29,11 @@ sed -i.bak '/"[$]schema":/a \
     }\
   },' .opencode/oh-my-openagent.jsonc
 
-opencode plugin opencode-acp -g
+npm i -g @colbymchenry/codegraph
+codegraph install --yes
+
+# this ACP is for Zed, but needs further testing to figure out how it works
+# opencode plugin opencode-acp -g
 opencode plugin @ramtinj95/opencode-tokenscope -g
 
 mkdir -p ~/.config/opencode/command

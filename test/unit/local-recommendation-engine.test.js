@@ -303,12 +303,14 @@ test("buildHardwareDeficitWarning reports same-specialty local fit failures and 
   const warning = buildHardwareDeficitWarning({ requirement, candidates, gpu, cloudOnly: false });
   const suppressed = buildHardwareDeficitWarning({ requirement, candidates, gpu, cloudOnly: true });
 
-  // Then: the warning explains the failed specialty and actionable resolutions, but cloud-only suppresses it.
-  assert.match(warning, /sisyphus/);
-  assert.match(warning, /reasoning/);
-  assert.match(warning, /lower target context/);
-  assert.match(warning, /install a smaller model/);
-  assert.match(warning, /--cloud-only/);
-  assert.match(warning, /upgrade VRAM/);
+  // Then: the warning object includes structured fields and an explanatory message, but cloud-only suppresses it.
+  assert.equal(warning.specialty, "reasoning");
+  assert.equal(warning.entryName, "sisyphus");
+  assert.equal(warning.gpuName, "RTX 4090");
+  assert.equal(warning.scope, "local");
+  assert.match(warning.message, /lower target context/);
+  assert.match(warning.message, /install a smaller model/);
+  assert.match(warning.message, /--cloud-only/);
+  assert.match(warning.message, /upgrade VRAM/);
   assert.equal(suppressed, null);
 });

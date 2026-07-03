@@ -38,8 +38,6 @@ $ npx omo-recommend-models --cloud-only --yes
 
 ```
 
-Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel survey instead of the default rule matcher.
-
 ---
 
 ## 🚩 CLI Flags Reference
@@ -50,7 +48,6 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 |------|---------|-------|-------------|
 | `--cloud-only` | `false` | `--exclude-local` | Skip GPU detection, Ollama, and all local model discovery. Only cloud providers are considered. |
 | `--local-only` | `false` | `--exclude-cloud` | Skip cloud model discovery and API provider checks. Only local/Ollama models are considered. |
-| `--model <ref>` | — | — | Use an explicit AI panel model (e.g. `opencode/big-pickle`). May be repeated for multiple models. |
 | `--exclude-model <ref>` | — | — | Exclude a specific model reference from consideration. Repeatable. |
 
 ### Exclusion Flags
@@ -61,16 +58,6 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 | `--no-exclude-free` | `false` | Negation of `--exclude-free`. Ensures free models are allowed in the final JSONC configuration. |
 | `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
 | `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
-| `--free-panel` | `false` | Explicitly include free/open-source models in the AI Panel evaluation. |
-| `--no-free-panel` | `false` | Negation of `--free-panel`. Exclude free models from the AI Panel model selection. |
-| `--exclude-codex` | `false` | Exclude `cli/codex` (OpenAI Codex CLI agent) from the AI Panel. |
-| `--exclude-codex-cli` | `false` | Alias for `--exclude-codex`. |
-| `--exclude-agy` | `false` | Exclude `cli/agy` (Agy CLI agent) from the AI Panel. |
-| `--exclude-agy-cli` | `false` | Alias for `--exclude-agy`. |
-| `--exclude-opencode` | `false` | Exclude `cli/opencode` (OpenCode CLI agent) from the AI Panel. |
-| `--exclude-opencode-cli` | `false` | Alias for `--exclude-opencode`. |
-| `--exclude-rate-limited` | `true` | **Deprecated — no-op.** Rate-limited providers are always excluded once detected. The flag is accepted for backward compatibility but the value is ignored. |
-| `--exclude-quota-restricted` | `true` | **Deprecated — no-op.** Quota-restricted providers are always excluded once detected. The flag is accepted for backward compatibility but the value is ignored. |
 
 ### Behavior Flags
 
@@ -79,11 +66,8 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 | `--yes`, `-y` | `false` | Apply all recommendations without interactive confirmation. Required for non-interactive/CI environments to proceed past preview. |
 | `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
-| `--ai-panel` | `false` | Use the legacy multi-model AI Panel survey instead of the default deterministic upstream rule chain. Panel reads `omo.panel_models` from the config file and calls each model for each agent/category. |
-| `--parallel-panel` | `false` | Run AI Panel model evaluations in parallel instead of sequentially. Can speed up panel completion when multiple panel models are available at the cost of higher API request concurrency. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
-| `--model <ref>` | — | Specify an explicit AI panel model reference. Repeatable: `--model prov/model1 --model prov/model2`. |
 
 ### Opt-Out Flags (Enabled by Default)
 
@@ -91,7 +75,6 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--no-cache` | `true` (cache enabled) | Skip loading cached panel results, forcing a fresh panel evaluation on every run. **Note:** Caching only applies to the `--ai-panel` path; the default deterministic rule-based mode always recomputes recommendations from scratch and is unaffected by this flag. |
 | `--no-install` | `true` (install enabled) | Skip pulling/installing recommended local Ollama models. Useful for preview-only runs or when you manage models separately. |
 | `--no-uninstall` | `true` (uninstall enabled) | Skip removing conflicting or superseded local Ollama models. |
 | `--no-remove-orphans` | `true` (orphan removal enabled) | Skip pruning Ollama models that the AI never evaluated or recommended. |
@@ -113,15 +96,13 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 
 ### Transparency Logging
 
-When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Panel Considerations & Exclusions` section showing which models, providers, and agents were included or excluded, and which CLI flags caused each exclusion:
+When running (even in `--dry-run` mode), the CLI prints a clearly labeled section showing which models, providers, and agents were included or excluded, and which CLI flags caused each exclusion:
 
 ```
-── AI Panel Considerations & Exclusions ──
+── Model Considerations & Exclusions ──
   • Local / Ollama models excluded via --exclude-local
   • Cloud / paid models considered
-  • AI CLI agent cli/codex excluded via --exclude-codex
-  • AI CLI agent cli/agy excluded via --exclude-agy
-  • Free models excluded from AI Panel via --no-free-panel
+  • Free models excluded via --exclude-free
   • Free models considered for JSONC configuration
 ```
 
@@ -175,7 +156,7 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
 
 * **Cloud inventory**
 
-    The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for the AI panel.
+    The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for rule-chain matching.
 * **Local inventory**
 
     If local discovery is enabled, the tool checks GPU/VRAM and Ollama, normalizes installed and cached Ollama models into candidate cards, infers each agent/category requirement, and ranks candidates by specialty, context support, estimated memory, parameter count, OpenRouter popularity when available, and installed-state tie-breaks. The fit budget is `gpu.vramGb * 0.90`; the active dynamic path does not subtract the old fixed 1.5 GB margin.
@@ -183,61 +164,14 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled `AI Pa
     The local memory estimate is approximate: model weight comes from Ollama manifest layer sizes when available, then catalog metadata, and KV cache is estimated from target context and parameter count. Candidates with unsafe missing metadata are rejected instead of guessed. When no same-specialty local model fits, the CLI prints a hardware deficit warning with practical next steps such as lowering context, installing a smaller model, using `--cloud-only`, or upgrading VRAM.
 * **Rate-limit and quota filtering**
 
-    Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured cloud models before deterministic rule matching or AI panel selection, removes blocked models from primary and `fallback_models`, and sanitizes cached/panel recommendations before writing JSONC.
-* **Panel model selection**
-
-    If you pass `--model provider/model`, those models are used for the AI panel. Otherwise the CLI can use configured `omo.panel_models`, selected paid models, or the default top free OpenCode panel models.
-
-## The AI suitability prompt
-
-For each agent or category, every panel model receives a compact prompt built from the current config entry, cloud candidates, fitting local models, and hardware facts. The prompt asks for strict JSON, not prose. In simplified form, it looks like this:
-
-```text
-OUTPUT: valid JSON only. No markdown.
-
-SCHEMA:
-{
-  "name": str,
-  "type": "agent|category",
-  "profile": str,
-  "model": {"provider": str, "model": str, "reason": str},
-  "fallback_models": [{"provider": str, "model": str, "reason": str}]
-}
-
-AGENT: <name> | <agent-or-category> | <quality> | cur=<current-model> | <description>
-HW: GPU=<label> VRAM=<total>GB usable=<usable>GB
-
-CLOUD (<count>):
-<provider/model score>
-
-LOCAL (<count> fit VRAM):
-<model name, total VRAM, weight, KV cache, score, installed/missing status>
-
-LOCAL_WARNING: <hardware deficit warning when no same-specialty local model fits>
-
-FIELDS: model=primary fallback_models=retry_pool
-RULES:
-- Sort fallback_models by score descending.
-- Paid/cloud as primary for reasoning/code agents.
-- Free model as fallback unless utility agent (explore/librarian/quick).
-- Prefer highest-scored cloud model for primary unless GPU requirements force local.
-- For utility agents, use highest-scored free cloud as primary.
-- For other agents, prioritize highest-scored paid/cloud model.
-- Set three fallback_models when possible:
-  * Slot 1 closely matches the primary model in intelligence and token window.
-  * Slot 2 is a highly available, fast mid-tier model.
-  * Slot 3 is the cheapest, highest-rate-limit model.
-- Remove duplicate entries across model and fallback_models.
-```
-
-The real prompt also includes concrete examples so panel models keep the primary `model` and retry `fallback_models` distinct.
+    Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured cloud models before deterministic rule matching, removes blocked models from primary and `fallback_models`, and sanitizes recommendations before writing JSONC.
 
 ## How `fallback_models` are determined
 
-By default, the CLI starts from upstream `rules(model-core)` fallback chains. With `--ai-panel`, the panel votes independently for each agent/category. In both modes, the CLI then:
+By default, the CLI starts from upstream `rules(model-core)` fallback chains. The CLI then:
 
-1. Picks or preserves the primary `model` from the rule chain or AI Panel consensus.
-2. Adds cloud `fallback_models` entries from rule chains or panel consensus.
+1. Picks or preserves the primary `model` from the rule chain.
+2. Adds cloud `fallback_models` entries from rule chains.
 3. Fills in missing cloud providers with each provider's highest-scored model, so a config is not dominated by one provider.
 4. Adds at most one computed local fallback for each entry when local discovery finds a fitting candidate for that entry's role.
 5. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
