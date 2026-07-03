@@ -1039,3 +1039,59 @@ test("no-install flag prints skipped message", async (t) => {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /skipped installation of deepseek-r1-b:8b via --no-install/);
 });
+
+test("cloud-only yes applies cloud model recommendations", async (t) => {
+  const harness = createHarness(t, {
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+        ],
+      },
+    },
+    config: defaultConfig({
+      root: {
+        agents: {
+          sisyphus: {
+            model: "opencode/big-pickle",
+            fallback_models: [],
+          },
+        },
+      },
+    }),
+    aiResponse: {
+      analysis: "cloud model recommendations",
+      cloudRecommendations: [
+        {
+          name: "sisyphus",
+          type: "agent",
+          profile: "orchestrator",
+          model: { provider: "opencode", model: "big-pickle" },
+          routing: [],
+          fallback_models: [
+            { provider: "opencode", model: "north-mini-code-free" },
+          ],
+        },
+      ],
+      localModels: { decisions: [], placements: [] },
+    },
+  });
+
+  const result = await runCli(harness.env, "", ["--cloud-only", "-y"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /◇\s+AI Analysis of/);
+  assert.match(result.stdout, /◇\s+Recommended provider\/model configurations/);
+  assert.match(result.stdout, /•\s+agents\.sisyphus/);
+  assert.match(result.stdout, /model: opencode\/big-pickle/);
+  assert.match(result.stdout, /fallback_models:/);
+  assert.match(result.stdout, /opencode\/north-mini-code-free/);
+  assert.match(result.stdout, /◇\s+Choosing to apply will/);
+  assert.match(result.stdout, /✓\s+•\s+Backup saved/);
+  assert.match(result.stdout, /\|\s+→\s+Validating changes/);
+  assert.match(result.stdout, /\|\s+•\s+Config valid/);
+  assert.match(result.stdout, /✓\s+•\s+\d+ section\(s\) updated/);
+  assert.match(result.stdout, /✓\s+Done/);
+});
