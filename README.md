@@ -5,37 +5,313 @@ https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
 A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file with fallback models enabled by default for each agent. 
 
 > [!TIP]
-> This tool generates a *point-in-time snapshot*. It does not replace dynamic API routing, it will not prevent real-time API quota rejections. Use this tool to get your initial bearings, or to recalibrate when you add more AI models to opencode, then let OmO handle the actual execution.
+> This tool generates a *point-in-time snapshot* of model recommendations. It enables dynamic API routing, and will help you navigate real-time API quota rejections when using opencode with oh-my-opencode (OmO). Use this tool to get your initial bearings, or to recalibrate when you add more AI models to opencode, then let OmO handle the actual execution.
 
 ## Quick Start
 
 Run the utility in your project directory to evaluate your available providers and preview the default deterministic rule-based recommendation:
 
-```
+```bash
 $ npx omo-recommend-models --cloud-only --yes
+```
+
+Output:
+
+```
+Need to install the following packages:
+omo-recommend-models@2.0.2
+Ok to proceed? (y) 
+
+✓  Checking GPU: skipped by --cloud-only
 │
-◇  Checking GPU: skipped by --cloud-only
+✓  Checking Ollama: skipped by --cloud-only
 │
-◇  Checking Ollama: skipped by --cloud-only
+✓  Discovering local model catalog: skipped by --cloud-only
 │
-◇  Discovering local model catalog: skipped by --cloud-only
+◇  Loaded: 1 providers (live from `opencode models --pure`) (2s)
 │
-◇  Loaded: 5 providers from ~/.cache/oh-my-opencode/provider-models.json
-│  Filtered against live models (via `opencode models --pure`) to prevent stale entries
+✓  Verifying cloud models availability: done 1/1 (2s)
 │
 ◇  AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/category-model-requirements.ts
 │
-◇  Recommended provider/model configurations for ~/.opencode/oh-my-openagent.jsonc:
-│  • agents.sisyphus
-│    model: openai/gpt-5.5
-│    fallback_models:
-│      1. opencode/big-pickle
-│      2. opencode/nemotron-3-ultra-free
+│  No available rule-chain models for:
 │
-│  → Dry run mode enabled; no changes have been applied.
-
+│  ◦ hephaestus:
+│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5)
+│
+│  ◦ oracle:
+│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      2. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
+│      3. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      4. (opencode-go, vercel)/glm-5.1)
+│
+│  ◦ librarian:
+│      1. openai/gpt-5.4-mini-fast
+│      2. (opencode-go, bailian-coding-plan)/qwen3.5-plus
+│      3. vercel/minimax-m2.7-highspeed
+│      4. (opencode-go, vercel)/minimax-m3
+│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
+│      6. (opencode-go, vercel)/minimax-m2.7
+│      7. (anthropic, github-copilot, vercel)/claude-haiku-4-5
+│      8. (openai, vercel)/gpt-5.4-nano)
+│
+│  ◦ explore:
+│      1. openai/gpt-5.4-mini-fast
+│      2. (opencode-go, bailian-coding-plan)/qwen3.5-plus
+│      3. vercel/minimax-m2.7-highspeed
+│      4. (opencode-go, vercel)/minimax-m3
+│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
+│      6. (opencode-go, vercel)/minimax-m2.7
+│      7. (anthropic, github-copilot, vercel)/claude-haiku-4-5
+│      8. (openai, vercel)/gpt-5.4-nano)
+│
+│  ◦ multimodal-looker:
+│      1. (openai, opencode, vercel)/gpt-5.5
+│      2. (opencode-go, vercel)/kimi-k2.6
+│      3. (zai-coding-plan, vercel)/glm-4.6v
+│      4. (openai, github-copilot, opencode, vercel)/gpt-5-nano)
+│
+│  ◦ prometheus:
+│      1. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      2. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      3. (opencode-go, vercel)/glm-5.1
+│      4. (google, github-copilot, opencode, vercel)/gemini-3.1-pro)
+│
+│  ◦ metis:
+│      1. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
+│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      3. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      4. (opencode-go, vercel)/glm-5.1
+│      5. kimi-for-coding/k2p5)
+│
+│  ◦ momus:
+│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      3. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
+│      4. (opencode-go, vercel)/glm-5.1)
+│
+│  ◦ atlas:
+│      1. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
+│      2. (opencode-go, vercel)/kimi-k2.6
+│      3. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      4. (opencode-go, vercel)/minimax-m3
+│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
+│      6. (opencode-go, vercel)/minimax-m2.7)
+│
+│  ◦ visual-engineering:
+│      1. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
+│      2. (zai-coding-plan, opencode, bailian-coding-plan, vercel)/glm-5
+│      3. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      4. (opencode-go, vercel)/glm-5.1
+│      5. kimi-for-coding/k2p5)
+│
+│  ◦ ultrabrain:
+│      1. (openai, opencode, vercel)/gpt-5.5
+│      2. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
+│      3. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      4. (opencode-go, vercel)/glm-5.1)
+│
+│  ◦ deep:
+│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      3. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
+│      4. (opencode-go, vercel)/kimi-k2.6
+│      5. (opencode-go, vercel)/glm-5.1)
+│
+│  ◦ artistry:
+│      1. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
+│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      3. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      4. (opencode-go, vercel)/kimi-k2.6
+│      5. (opencode-go, vercel)/glm-5.1)
+│
+│  ◦ quick:
+│      1. (openai, github-copilot, opencode, vercel)/gpt-5.4-mini
+│      2. (anthropic, github-copilot, vercel)/claude-haiku-4-5
+│      3. (google, github-copilot, opencode, vercel)/gemini-3-flash
+│      4. (opencode-go, vercel)/minimax-m3
+│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
+│      6. (opencode-go, vercel)/minimax-m2.7
+│      7. (opencode, vercel)/gpt-5-nano)
+│
+│  ◦ unspecified-low:
+│      1. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
+│      2. (openai, opencode, vercel)/gpt-5.5
+│      3. (opencode-go, vercel)/kimi-k2.6
+│      4. (google, github-copilot, opencode, vercel)/gemini-3-flash
+│      5. (opencode-go, vercel)/minimax-m3
+│      6. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
+│      7. (opencode-go, vercel)/minimax-m2.7)
+│
+│  ◦ unspecified-high:
+│      1. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
+│      2. (openai, github-copilot, opencode, vercel)/gpt-5.5
+│      3. (zai-coding-plan, opencode, bailian-coding-plan, vercel)/glm-5
+│      4. kimi-for-coding/k2p5
+│      5. (opencode-go, vercel)/glm-5.1
+│      6. (opencode, bailian-coding-plan, vercel, moonshotai, moonshotai-cn, firmware, ollama-cloud, aihubmix)/kimi-k2.5)
+│
+│  ◦ writing:
+│      1. (google, github-copilot, opencode, vercel)/gemini-3-flash
+│      2. (opencode-go, vercel)/kimi-k2.6
+│      3. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
+│      4. (opencode-go, vercel)/minimax-m3
+│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
+│      6. (opencode-go, vercel)/minimax-m2.7)
+│
+◇  Recommended provider/model configurations for /project/.opencode/oh-my-openagent.jsonc:
+│  • agents.sisyphus
+│    ◦ model: opencode/big-pickle
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/mimo-v2.5-free
+│
+│  • agents.hephaestus
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.oracle
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.librarian
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.explore
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.multimodal-looker
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.prometheus
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.metis
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.momus
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.atlas
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • agents.sisyphus-junior
+│    ◦ model: opencode/big-pickle
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/mimo-v2.5-free
+│
+│  • agents.scout
+│    ◦ model: opencode/deepseek-v4-flash-free
+│
+│  • agents.sysadmin
+│    ◦ model: opencode/deepseek-v4-flash-free
+│
+│  • categories.visual-engineering
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.ultrabrain
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.deep
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.artistry
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.quick
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.unspecified-low
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.unspecified-high
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│  • categories.writing
+│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│
+│
+◇  Choosing to apply will:
+│  • Move existing file to: /project/.opencode/oh-my-openagent.jsonc.pre-recommend
+│  • Write new file: /project/.opencode/oh-my-openagent.jsonc
+│
+✓  • Backup saved to /project/.opencode/oh-my-openagent.jsonc.pre-recommend
+|  → Validating changes...
+|  • Config valid: /project/.opencode/oh-my-openagent.jsonc
+✓  • 21 section(s) updated.
+|
+✓  Done.
 ```
 
 ---
@@ -113,26 +389,15 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled sectio
 * **Computed local fit recommendations** 
 
     Detects your GPU and Ollama catalog, estimates each local model's weight plus KV-cache cost, and recommends only models that fit the active role and the available VRAM budget. Local recommendations are computed from metadata and hardware facts, not a hand-curated static table.
-* **Cloud cost, context, and availability comparisons** 
+* **Automatic retry and fallback to free and local models** 
 
-    Provides a quick, point-in-time stack-rank of models from AI cloud providers you have authenticated in opencode (via `opencode auth login`), then removes providers that are currently rate-limited, quota-blocked, or otherwise unavailable. Advertised model refs are also probed before assignment; a provider can stay eligible while one unavailable model from that provider is rejected.
+    Provides a sensible fallback to the most preferred cloud and local AI models for each oh-my-openagent agent and category. These fallbacks are identified from rules published in the oh-my-openagent project, and from an AI assessment.
 * **Initial template generation** 
 
     Writes a baseline `oh-my-openagent.jsonc` file with valid syntax, canonical `provider/model` references, cloud fallbacks, and local fallbacks when they are confirmed installed or explicitly installed during the run.
-
----
-
-## 🚫 What this tool can't do, and why you shouldn't overuse it
-
-* **It does NOT handle rate limits or empty quotas over time**
+* **It configures oh-my-opencode to proceed, despite rate limits or quota exhaustion in preferred AI Providers**
   
-    If a provider runs out of credits mid-task, running a CLI tool is the wrong way to fix it. Set up the `fallback_models: []` array natively in OmO, or use a unified router like LiteLLM/OpenRouter to handle 402/429 errors automatically at runtime.
-* **It does NOT provide real-time speed benchmarks**
-  
-    Cloud API latency fluctuates by the minute based on network traffic. The "fastest" provider at 9:00 AM might be the slowest by 9:05 AM. Do not rely on this tool for real-time latency routing.
-* **It does NOT evaluate "hallucinations"**
-  
-    Model intelligence and hallucination rates require massive, standardized evaluation datasets (like MMLU) to quantify. This lightweight CLI cannot programmatically test a model's accuracy. 
+    If a provider runs out of credits mid-task, the `fallback_models: []` array is used by OmO with 60 second timeout intervals. 400 (Bad Request), 402 (quota exhaustion) and 429 (too many requests), 503 (service unavailable) and 529 (site is overloaded) errors result in automatic failover at runtime.
 
 ---
 
@@ -146,13 +411,13 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled sectio
     and want a quick CLI wizard to generate your first valid JSON config file.
 3. **A restructuring of available providers** 
 
-    If there are changes to what AI providers you're using, and need to add or remove models from your configuration.
+    If there are changes to what AI providers you're using, or your AI providers have added or removed AI models.
 
 ---
 
 ## How model selection works
 
-`omo-recommend-models` builds a point-in-time recommendation. It does not continuously test providers, benchmark latency, or route around live outages. The important parts are:
+`omo-recommend-models` builds a point-in-time recommendation.
 
 * **Cloud inventory**
 
@@ -164,7 +429,7 @@ When running (even in `--dry-run` mode), the CLI prints a clearly labeled sectio
     The local memory estimate is approximate: model weight comes from Ollama manifest layer sizes when available, then catalog metadata, and KV cache is estimated from target context and parameter count. Candidates with unsafe missing metadata are rejected instead of guessed. When no same-specialty local model fits, the CLI prints a hardware deficit warning with practical next steps such as lowering context, installing a smaller model, using `--cloud-only`, or upgrading VRAM.
 * **Rate-limit and quota filtering**
 
-    Rate-limited and quota-restricted providers are excluded once detected. The CLI probes configured cloud models before deterministic rule matching, removes blocked models from primary and `fallback_models`, and sanitizes recommendations before writing JSONC.
+    Rate-limited and quota-restricted providers are excluded once detected. If one AI model at a provider responds with a 402 or 429 error, it is excluded from the configuration. Recommendations are sanitized and sorted before being written to the JSONC configuration file.
 
 ## How `fallback_models` are determined
 
