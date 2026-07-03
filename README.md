@@ -51,6 +51,7 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 | `--cloud-only` | `false` | `--exclude-local` | Skip GPU detection, Ollama, and all local model discovery. Only cloud providers are considered. |
 | `--local-only` | `false` | `--exclude-cloud` | Skip cloud model discovery and API provider checks. Only local/Ollama models are considered. |
 | `--model <ref>` | — | — | Use an explicit AI panel model (e.g. `opencode/big-pickle`). May be repeated for multiple models. |
+| `--exclude-model <ref>` | — | — | Exclude a specific model reference from consideration. Repeatable. |
 
 ### Exclusion Flags
 
@@ -66,15 +67,20 @@ Pass `--ai-panel` when you explicitly want the legacy multi-model AI Panel surve
 | `--exclude-codex-cli` | `false` | Alias for `--exclude-codex`. |
 | `--exclude-agy` | `false` | Exclude `cli/agy` (Agy CLI agent) from the AI Panel. |
 | `--exclude-agy-cli` | `false` | Alias for `--exclude-agy`. |
-| `--exclude-rate-limited` | `true` | Compatibility flag. Providers that return rate-limit (HTTP 429) errors are excluded once detected. |
-| `--exclude-quota-restricted` | `true` | Compatibility flag. Providers with quota, billing, credit, auth, or payment errors are excluded once detected. |
+| `--exclude-opencode` | `false` | Exclude `cli/opencode` (OpenCode CLI agent) from the AI Panel. |
+| `--exclude-opencode-cli` | `false` | Alias for `--exclude-opencode`. |
+| `--exclude-rate-limited` | `true` | **Deprecated — no-op.** Rate-limited providers are always excluded once detected. The flag is accepted for backward compatibility but the value is ignored. |
+| `--exclude-quota-restricted` | `true` | **Deprecated — no-op.** Quota-restricted providers are always excluded once detected. The flag is accepted for backward compatibility but the value is ignored. |
 
 ### Behavior Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--yes`, `-y` | `false` | Apply all recommendations without interactive confirmation. Required for non-interactive/CI environments to proceed past preview. |
+| `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
+| `--ai-panel` | `false` | Use the legacy multi-model AI Panel survey instead of the default deterministic upstream rule chain. Panel reads `omo.panel_models` from the config file and calls each model for each agent/category. |
+| `--parallel-panel` | `false` | Run AI Panel model evaluations in parallel instead of sequentially. Can speed up panel completion when multiple panel models are available at the cost of higher API request concurrency. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
 | `--model <ref>` | — | Specify an explicit AI panel model reference. Repeatable: `--model prov/model1 --model prov/model2`. |
@@ -85,7 +91,7 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--no-cache` | `true` (cache enabled) | Skip loading cached AI panel results. Forces a fresh panel evaluation on every run. |
+| `--no-cache` | `true` (cache enabled) | Skip loading cached panel results, forcing a fresh panel evaluation on every run. **Note:** Caching only applies to the `--ai-panel` path; the default deterministic rule-based mode always recomputes recommendations from scratch and is unaffected by this flag. |
 | `--no-install` | `true` (install enabled) | Skip pulling/installing recommended local Ollama models. Useful for preview-only runs or when you manage models separately. |
 | `--no-uninstall` | `true` (uninstall enabled) | Skip removing conflicting or superseded local Ollama models. |
 | `--no-remove-orphans` | `true` (orphan removal enabled) | Skip pruning Ollama models that the AI never evaluated or recommended. |
