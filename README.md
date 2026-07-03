@@ -1,5 +1,3 @@
-https://github.com/user-attachments/assets/993c0030-4235-468b-a3c3-4d9d74b15343
-
 # 🛠️ omo-recommend-models
 
 A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file with fallback models enabled by default for each agent. 
@@ -19,7 +17,7 @@ Output:
 
 ```
 Need to install the following packages:
-omo-recommend-models@2.0.2
+omo-recommend-models@2.0.3
 Ok to proceed? (y) 
 
 ✓  Checking GPU: skipped by --cloud-only
@@ -28,7 +26,7 @@ Ok to proceed? (y)
 │
 ✓  Discovering local model catalog: skipped by --cloud-only
 │
-◇  Loaded: 1 providers (live from `opencode models --pure`) (2s)
+◇  Loaded: 1 providers (live from `opencode models`) (2s)
 │
 ✓  Verifying cloud models availability: done 1/1 (2s)
 │
@@ -332,7 +330,7 @@ Ok to proceed? (y)
 |------|---------|-------------|
 | `--exclude-free` | `false` | Exclude free/open-source models from the final JSONC configuration output. Free models are included by default. |
 | `--no-exclude-free` | `false` | Negation of `--exclude-free`. Ensures free models are allowed in the final JSONC configuration. |
-| `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
+| `--free-config` | `true` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
 | `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
 
 ### Behavior Flags
@@ -369,10 +367,6 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 |---------|-----------------|-----------------|
 | **TTY terminal** | Prompts for confirmation on installs, uninstalls, and config writes. Auto-yes only if `--yes` passed. | Pass `--yes` to skip all prompts. Pass `--interactive` to force prompts in CI. |
 | **Non-TTY / CI** | Dry-run preview only. Shows what would change without writing anything. | Pass `--yes` to auto-apply. Pass individual `--no-*` flags to opt out of specific steps. |
-
-### Transparency Logging
-
-When running (even in `--dry-run` mode), the CLI prints a clearly labeled section showing which models, providers, and agents were included or excluded, and which CLI flags caused each exclusion:
 
 ```
 ── Model Considerations & Exclusions ──
