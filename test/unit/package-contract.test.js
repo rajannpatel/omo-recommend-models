@@ -38,9 +38,8 @@ test("public package entry exports stable CLI helpers", () => {
   assert.equal(CLI_VERSION, packageJson.version);
   assert.equal(
     DEFAULT_SCHEMA,
-    "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/master/assets/oh-my-opencode.schema.json",
+    "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",
   );
-  assert.equal(DEFAULT_SCHEMA.includes("/dev/"), false);
   assert.equal(typeof parseCliOptions, "function");
   assert.equal(typeof runValidateConfigCli, "function");
   assert.match(validateConfigUsage(), /^Usage: omo-validate-config \[--config <path>\]/);

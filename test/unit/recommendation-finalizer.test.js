@@ -230,3 +230,46 @@ test("completeAiRecommendations filters blocked models per provider", () => {
     ["opencode/fallback-free"],
   );
 });
+
+test("completeAiRecommendations preserves ruleChainMatched flag through finalization", () => {
+  const config = {
+    agents: {
+      sisyphus: { model_quality: "high" },
+    },
+    categories: {},
+  };
+  const cloudLookup = {
+    byId: {
+      opencode: new Map([
+        ["primary-free", { context_length: 128000 }],
+      ]),
+    },
+    sets: {},
+  };
+  const aiResult = {
+    cloudRecommendations: [
+      {
+        name: "sisyphus",
+        type: "agent",
+        profile: "reasoning",
+        ruleChainMatched: true,
+        model: { provider: "opencode", model: "primary-free", reason: "primary" },
+        routing: [],
+        fallback_models: [],
+      },
+    ],
+    localModels: { decisions: [], placements: [] },
+  };
+
+  const completed = completeAiRecommendations(
+    aiResult,
+    config,
+    cloudLookup,
+    [],
+    { hasGpu: false, vramGb: 0 },
+    { models: [] },
+  );
+
+  const [rec] = completed.cloudRecommendations;
+  assert.equal(rec.ruleChainMatched, true);
+});

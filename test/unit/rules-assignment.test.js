@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   createRuleBasedRecommendations,
 } from "../../lib/recommend/rules-assignment.js";
+import { completeAiRecommendations } from "../../lib/recommend/recommendation-finalizer.js";
+import { rankFallbacksByFitness } from "../../lib/recommend/fitness-ranking.js";
 
 function lookup(models) {
   const byId = {};
@@ -294,4 +296,106 @@ test("createRuleBasedRecommendations does not infer arbitrary same-name provider
   assert.equal(rec.model.provider, "unknown-paid");
   assert.equal(rec.model.model, "gpt-5.5");
   assert.equal(rec.model.reason, "Best available paid model outside upstream rule chain");
+});
+
+test("createRuleBasedRecommendations sets ruleChainMatched:true for rule-chain matched entries", () => {
+  const config = {
+    agents: {
+      sisyphus: { description: "orchestrator" },
+    },
+    categories: {},
+  };
+
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      "opencode-go": ["kimi-k2.6"],
+      openai: ["gpt-5.5"],
+      opencode: ["big-pickle"],
+    }),
+  });
+
+  assert.equal(result.cloudRecommendations.length, 1);
+  const sisyphus = result.cloudRecommendations.find((rec) => rec.name === "sisyphus");
+  assert.equal(sisyphus.ruleChainMatched, true,
+    "sisyphus has upstream rule-chain match → ruleChainMatched should be true");
+});
+
+test("createRuleBasedRecommendations sets ruleChainMatched:false for pipeline-matched entries", () => {
+  const config = {
+    agents: {
+      hephaestus: { description: "builder" },
+    },
+    categories: {},
+  };
+
+  // hephaestus has upstream rules but if chain is exhausted (no matching models)
+  // it falls through to pipeline matching
+  const result = createRuleBasedRecommendations({
+    config,
+    cloudLookup: lookup({
+      opcode: ["tiny-mini"], // not in hephaestus rule chain
+    }),
+  });
+
+  const hephaestus = result.cloudRecommendations[0];
+  assert.equal(hephaestus.ruleChainMatched, false,
+    "entry matched via pipeline should have ruleChainMatched:false");
+});
+
+test("end-to-end ruleChainMatched pipeline: createRuleBasedRecommendations → completeAiRecommendations → rankFallbacksByFitness preserves rule-chain entries", async () => {
+  const config = {
+    agents: {
+      sisyphus: { description: "orchestrator" },
+    },
+    categories: {},
+  };
+
+  // Create cloudLookup with models that match sisyphus's rule chain
+  const cloudLookup = lookup({
+    "opencode-go": ["kimi-k2.6"],
+    openai: ["gpt-5.5"],
+    opencode: ["big-pickle", "north-mini-code-free"],
+  });
+
+  // Step 1: Create rule-based recommendations (produces ruleChainMatched: true for sisyphus)
+  const ruleResult = createRuleBasedRecommendations({
+    config,
+    cloudLookup,
+  });
+
+  assert.equal(ruleResult.cloudRecommendations.length, 1);
+  const sisyphus = ruleResult.cloudRecommendations.find((rec) => rec.name === "sisyphus");
+  assert.equal(sisyphus.ruleChainMatched, true, "rule-chain matched entry should have ruleChainMatched: true");
+
+  // Capture the original model and fallback_models before finalization/ranking
+  const originalModel = { ...sisyphus.model };
+  const originalFallbackModels = sisyphus.fallback_models.map(f => ({ ...f }));
+
+  // Step 2: Complete AI recommendations (finalization)
+  const completed = completeAiRecommendations(
+    ruleResult,
+    config,
+    cloudLookup,
+    [], // allLocalModels
+    { hasGpu: false, vramGb: 0 }, // gpu
+    { models: [] }, // ollama
+    () => true, // isProviderAllowed
+    null, // localRecommendationContext
+    () => true, // isModelAllowed
+  );
+
+  // Verify ruleChainMatched survives finalization
+  const completedSisyphus = completed.cloudRecommendations.find((rec) => rec.name === "sisyphus");
+  assert.equal(completedSisyphus.ruleChainMatched, true, "ruleChainMatched should survive completeAiRecommendations");
+
+  // Step 3: Rank fallbacks by fitness (AI ranking - should skip rule-chain entries)
+  // This may call opencode binary if available, but rule-chain entries are guarded
+  await rankFallbacksByFitness(completed.cloudRecommendations);
+
+  // Verify the rule-chain-matched entry was NOT mutated by AI ranking
+  const finalSisyphus = completed.cloudRecommendations.find((rec) => rec.name === "sisyphus");
+  assert.deepEqual(finalSisyphus.model, originalModel, "ruleChainMatched entry model must remain unchanged after ranking");
+  assert.deepEqual(finalSisyphus.fallback_models, originalFallbackModels, "ruleChainMatched entry fallback_models must remain unchanged after ranking");
+  assert.equal(finalSisyphus.aiUsedModel, undefined, "ruleChainMatched entry must not acquire aiUsedModel");
 });

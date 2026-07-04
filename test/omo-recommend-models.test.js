@@ -29,8 +29,15 @@ const defaultAiResponse = {
 
 function defaultConfig(overrides = {}) {
   return {
-    $schema: "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/master/assets/oh-my-opencode.schema.json",
-    runtime_fallback: true,
+    $schema: "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",
+    model_fallback: true,
+    runtime_fallback: {
+      enabled: true,
+      retry_on_errors: [400, 429, 500, 502, 503, 504, 529],
+      max_fallback_attempts: 3,
+      cooldown_seconds: 60,
+      notify_on_fallback: true,
+    },
     git_master: {
       commit_footer: true,
       include_co_authored_by: true,
