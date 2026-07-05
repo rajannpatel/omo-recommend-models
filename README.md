@@ -441,3 +441,74 @@ By default, the CLI starts from upstream `rules(model-core)` fallback chains. Th
 5. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
 6. Deduplicates `fallback_models`, removes anything that duplicates the primary model, and orders local fallbacks last after cloud fallbacks.
 7. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
+
+## How the AI model-fitness ranking works
+
+When the deterministic upstream rule chain cannot find matching models for an entry (agent or category), the tool offloads model selection to an AI ranking process. This happens for entries where no rule-chain candidate survives provider availability filtering or exclusion rules.
+
+### Which models do the ranking
+
+The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). These are discovered at startup via `opencode models --json --include-free` and cached in `FREE_MODELS`. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
+
+These free models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
+
+### What information is sent to the AI
+
+For each entry that needs ranking, the tool builds a prompt containing:
+
+- **Agent/category name and type** — e.g., `sisyphus (agent)` or `visual-engineering (category)`.
+- **Upstream rule-chain requirements** — extracted from the vendored `AGENT_MODEL_REQUIREMENTS` or `CATEGORY_MODEL_REQUIREMENTS` snapshots (mirrored from `code-yeongyu/oh-my-openagent` `dev` branch). This includes the full prioritized provider/model fallback chain with any variant, `requiresProvider`, or `requiresAnyModel` constraints.
+- **Available model pool** — every model that survived provider availability probing, rate-limit filtering, quota checks, and exclusion rules, formatted as `provider/model` strings.
+
+The prompt asks the AI to rank **all** available models from most suitable (1) to least suitable (N) for each entry's role, considering model quality tier, provider reputation, and model-specific strengths. The AI must return a bare JSON object — no explanation or markdown.
+
+### How the ranking is applied
+
+When the AI returns a valid JSON ranking for an entry:
+
+1. Each `provider/model` string in the ranking is fuzzy-matched against the entry's actual model pool using `matchModelRef()`, which tries exact match → case-insensitive match → provider-stripped name match.
+2. The matched models are reordered by AI rank position. Models the AI did not rank (unranked or unrecognized refs) are pushed to the end, sorted last.
+3. The first ranked model becomes the entry's new `model`; the rest become `fallback_models` in AI order.
+4. The entry is tagged with `rec.aiUsedModel` recording which free OpenCode model produced the ranking.
+
+Any model ref the AI outputs that cannot be matched to the actual available pool (e.g., hallucinated provider names) is silently dropped. If the AI returns no valid ranking at all, the entry keeps its heuristic order from `recommendation-finalizer.js`.
+
+### Round-robin concurrency model
+
+All entries that need AI ranking are processed **concurrently**, with one important optimization to distribute load evenly across available free models:
+
+- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads the initial ~19 queries uniformly across all available free models rather than hammering the first model with all requests.
+- **Retry with rotation**: if a model call fails (timeout, crash, invalid response) for a given entry, the entry advances to `models[(modelStart + 1) % modelCount]`, then `(modelStart + 2)`, and so on, wrapping around until either a model returns a valid ranking or all models are exhausted for that entry.
+- **Concurrency ceiling**: because each entry fires one `opencode run` call at a time (sequential retries within each entry's handler), the maximum concurrent `opencode` processes equals the number of entries being ranked. In practice this is ~19 subprocesses, each with a 120-second timeout. There is no batch limit or throttling — the OS process scheduler handles fairness.
+- **No per-model retries**: each model is tried exactly once per entry. If it fails, the entry moves to the next model immediately. There is no exponential backoff or retry within the same model. A failure is logged to stderr with the debug label `agentName@provider/model`.
+- **Fail-open**: if all models fail for an entry, the entry keeps its original heuristic ordering from the finalization pipeline. The CLI prints a summary of how many entries were ranked and which models were used.
+
+### How the ranking process is exposed to the user
+
+During execution, the CLI prints a live progress line:
+
+```
+◇  AI ranking 19 agent(s)/category(ies) by model fitness — processed 12/19
+```
+
+Each failed model call appends a diagnostic line to stderr:
+
+```
+  ✗ sisyphus@opencode/mimo-v2.5-free — opencode exited with code 1
+```
+
+On completion, a summary line shows reachable models and ranking coverage:
+
+```
+✓  AI ranking 19: 19/19 ranked (used: opencode/deepseek-v4-flash-free, opencode/north-mini-code-free)
+```
+
+or, if all AI calls failed:
+
+```
+◇  AI ranking 19: AI unavailable — using heuristic order
+```
+
+### AI analysis is additive, not exclusive
+
+The AI ranking **only** runs for entries where the upstream rule chain could not find a match. Entries with a valid rule-chain match (`rec.ruleChainMatched === true`) are printed as skipped and keep their deterministic assignment. The AI ranking thus fills gaps in the rule chain rather than replacing it, ensuring deterministic behavior for well-covered entries and AI-driven selection for uncovered ones.

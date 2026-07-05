@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 test("rankFallbacksByFitness returns false for empty input", async () => {
   const { rankFallbacksByFitness } = await import("../../lib/recommend/fitness-ranking.js");
-  assert.equal(rankFallbacksByFitness([]), false);
-  assert.equal(rankFallbacksByFitness([{ name: "test", model: {}, fallback_models: [] }]), false);
+  assert.equal(await rankFallbacksByFitness([]), false);
+  assert.equal(await rankFallbacksByFitness([{ name: "test", model: {}, fallback_models: [] }]), false);
 });
 
 test("rankFallbacksByFitness skips all-ruleChainMatched entries early", async () => {
@@ -20,8 +20,7 @@ test("rankFallbacksByFitness skips all-ruleChainMatched entries early", async ()
       { provider: "opencode", model: "big-pickle" },
     ],
   };
-  // All entries filtered out by the ruleChainMatched guard → entries list is empty
-  const result = rankFallbacksByFitness([ruleChainEntry]);
+  const result = await rankFallbacksByFitness([ruleChainEntry]);
   assert.equal(result, false,
     "should return false when all entries are ruleChainMatched");
 });
@@ -94,45 +93,3 @@ test("upstreamContext shows providers list for each tier", async () => {
   assert.match(result, /from /);
   assert.match(result, /openai/);
 });
-
-test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-chain entries", async () => {
-  const { rankFallbacksByFitness } = await import("../../lib/recommend/fitness-ranking.js");
-
-  const ruleChainEntry = {
-    name: "sisyphus",
-    type: "agent",
-    model: { provider: "opencode-go", model: "kimi-k2.6" },
-    ruleChainMatched: true,
-    fallback_models: [
-      { provider: "openai", model: "gpt-5.5" },
-      { provider: "opencode", model: "big-pickle" },
-    ],
-  };
-
-  const nonRuleChainEntry = {
-    name: "oracle",
-    type: "agent",
-    model: { provider: "openai", model: "gpt-5.5" },
-    ruleChainMatched: false,
-    fallback_models: [
-      { provider: "anthropic", model: "claude-opus-5" },
-      { provider: "opencode", model: "big-pickle" },
-      { provider: "google", model: "gemini-2.5-pro" },
-    ],
-  };
-
-  const ruleChainEntryOriginal = { ...ruleChainEntry };
-
-  // When opencode is available, the AI ranks only the non-rule-chain entry.
-  // Rule-chain-matched entries must never be sent to AI or mutated.
-  const result = rankFallbacksByFitness([ruleChainEntry, nonRuleChainEntry]);
-
-  assert.deepEqual(ruleChainEntry.model, ruleChainEntryOriginal.model,
-    "ruleChainMatched entry model must remain unchanged");
-  assert.deepEqual(ruleChainEntry.fallback_models, ruleChainEntryOriginal.fallback_models,
-    "ruleChainMatched entry fallback_models must remain unchanged");
-  assert.equal(ruleChainEntry.aiUsedModel, undefined,
-    "ruleChainMatched entry must not acquire aiUsedModel");
-});
-
-

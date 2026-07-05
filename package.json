@@ -39,7 +39,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --experimental-test-module-mocks",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint 'bin/*' 'lib/**/*.js'",
     "pack:check": "npm pack --dry-run"
   },
