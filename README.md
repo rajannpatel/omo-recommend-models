@@ -13,297 +13,31 @@ Run the utility in your project directory to evaluate your available providers a
 $ npx omo-recommend-models --cloud-only --yes
 ```
 
-Output:
+Output (abridged — actual output varies by hardware and provider availability):
 
 ```
-Need to install the following packages:
-omo-recommend-models@2.0.6
-Ok to proceed? (y) 
-
 ◇  Verifying availability for 3 cloud provider(s) — this may take ~30s...
-│
 ◇  Checking GPU: NVIDIA GeForce RTX 3070 Ti Laptop GPU (8 GB VRAM) (0s)
-│
 ◇  Checking Ollama: 1 installed model(s) (0s)
-│
-◇  Discovering local model catalog: 68 cached models (0s)
-│
 ◇  Loaded: 3 providers (live from `opencode models`) (2s)
-│
 ✓  Verifying cloud models availability: done 3/3 (30s)
-│
 ◇  AI ranking 21 agent(s)/category(ies) by model fitness — this may take ~60s...
 ✓  Ranking models by AI fitness: ranked by opencode/big-pickle 1/1 (75s)
-│
+
 ◇  AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/category-model-requirements.ts
 │
-│  No available rule-chain models for:
-│
-│  ◦ hephaestus:
-│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5)
-│
-│  ◦ oracle:
-│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      2. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
-│      3. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      4. (opencode-go, vercel)/glm-5.1)
-│
-│  ◦ librarian:
-│      1. openai/gpt-5.4-mini-fast
-│      2. (opencode-go, bailian-coding-plan)/qwen3.5-plus
-│      3. vercel/minimax-m2.7-highspeed
-│      4. (opencode-go, vercel)/minimax-m3
-│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
-│      6. (opencode-go, vercel)/minimax-m2.7
-│      7. (anthropic, github-copilot, vercel)/claude-haiku-4-5
-│      8. (openai, vercel)/gpt-5.4-nano)
-│
-│  ◦ explore:
-│      1. openai/gpt-5.4-mini-fast
-│      2. (opencode-go, bailian-coding-plan)/qwen3.5-plus
-│      3. vercel/minimax-m2.7-highspeed
-│      4. (opencode-go, vercel)/minimax-m3
-│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
-│      6. (opencode-go, vercel)/minimax-m2.7
-│      7. (anthropic, github-copilot, vercel)/claude-haiku-4-5
-│      8. (openai, vercel)/gpt-5.4-nano)
-│
-│  ◦ multimodal-looker:
-│      1. (openai, opencode, vercel)/gpt-5.5
-│      2. (opencode-go, vercel)/kimi-k2.6
-│      3. (zai-coding-plan, vercel)/glm-4.6v
-│      4. (openai, github-copilot, opencode, vercel)/gpt-5-nano)
-│
-│  ◦ prometheus:
-│      1. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      2. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      3. (opencode-go, vercel)/glm-5.1
-│      4. (google, github-copilot, opencode, vercel)/gemini-3.1-pro)
-│
-│  ◦ metis:
-│      1. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
-│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      3. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      4. (opencode-go, vercel)/glm-5.1
-│      5. kimi-for-coding/k2p5)
-│
-│  ◦ momus:
-│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      3. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
-│      4. (opencode-go, vercel)/glm-5.1)
-│
-│  ◦ atlas:
-│      1. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
-│      2. (opencode-go, vercel)/kimi-k2.6
-│      3. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      4. (opencode-go, vercel)/minimax-m3
-│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
-│      6. (opencode-go, vercel)/minimax-m2.7)
-│
-│  ◦ visual-engineering:
-│      1. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
-│      2. (zai-coding-plan, opencode, bailian-coding-plan, vercel)/glm-5
-│      3. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      4. (opencode-go, vercel)/glm-5.1
-│      5. kimi-for-coding/k2p5)
-│
-│  ◦ ultrabrain:
-│      1. (openai, opencode, vercel)/gpt-5.5
-│      2. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
-│      3. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      4. (opencode-go, vercel)/glm-5.1)
-│
-│  ◦ deep:
-│      1. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      3. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
-│      4. (opencode-go, vercel)/kimi-k2.6
-│      5. (opencode-go, vercel)/glm-5.1)
-│
-│  ◦ artistry:
-│      1. (google, github-copilot, opencode, vercel)/gemini-3.1-pro
-│      2. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      3. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      4. (opencode-go, vercel)/kimi-k2.6
-│      5. (opencode-go, vercel)/glm-5.1)
-│
-│  ◦ quick:
-│      1. (openai, github-copilot, opencode, vercel)/gpt-5.4-mini
-│      2. (anthropic, github-copilot, vercel)/claude-haiku-4-5
-│      3. (google, github-copilot, opencode, vercel)/gemini-3-flash
-│      4. (opencode-go, vercel)/minimax-m3
-│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
-│      6. (opencode-go, vercel)/minimax-m2.7
-│      7. (opencode, vercel)/gpt-5-nano)
-│
-│  ◦ unspecified-low:
-│      1. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
-│      2. (openai, opencode, vercel)/gpt-5.5
-│      3. (opencode-go, vercel)/kimi-k2.6
-│      4. (google, github-copilot, opencode, vercel)/gemini-3-flash
-│      5. (opencode-go, vercel)/minimax-m3
-│      6. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
-│      7. (opencode-go, vercel)/minimax-m2.7)
-│
-│  ◦ unspecified-high:
-│      1. (anthropic, github-copilot, opencode, vercel)/claude-opus-4-7
-│      2. (openai, github-copilot, opencode, vercel)/gpt-5.5
-│      3. (zai-coding-plan, opencode, bailian-coding-plan, vercel)/glm-5
-│      4. kimi-for-coding/k2p5
-│      5. (opencode-go, vercel)/glm-5.1
-│      6. (opencode, bailian-coding-plan, vercel, moonshotai, moonshotai-cn, firmware, ollama-cloud, aihubmix)/kimi-k2.5)
-│
-│  ◦ writing:
-│      1. (google, github-copilot, opencode, vercel)/gemini-3-flash
-│      2. (opencode-go, vercel)/kimi-k2.6
-│      3. (anthropic, github-copilot, opencode, vercel)/claude-sonnet-4-6
-│      4. (opencode-go, vercel)/minimax-m3
-│      5. (minimax-coding-plan, minimax-cn-coding-plan)/MiniMax-M3
-│      6. (opencode-go, vercel)/minimax-m2.7)
+│  No available rule-chain models for: hephaestus, oracle, librarian, explore, ... (17 entries)
 │
 ◇  Recommended provider/model configurations for /project/.opencode/oh-my-openagent.jsonc:
 │  • agents.sisyphus
 │    ◦ model: opencode/big-pickle
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/mimo-v2.5-free
-│
-│  • agents.hephaestus
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
+│    ◦ fallback_models: opencode/deepseek-v4-flash-free, opencode/north-mini-code-free, opencode/mimo-v2.5-free
 │  • agents.oracle
 │    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.librarian
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.explore
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.multimodal-looker
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.prometheus
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.metis
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.momus
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.atlas
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • agents.sisyphus-junior
-│    ◦ model: opencode/big-pickle
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/mimo-v2.5-free
-│
-│  • agents.scout
-│    ◦ model: opencode/deepseek-v4-flash-free
-│
-│  • agents.sysadmin
-│    ◦ model: opencode/deepseek-v4-flash-free
-│
-│  • categories.visual-engineering
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.ultrabrain
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.deep
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.artistry
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.quick
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.unspecified-low
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.unspecified-high
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
-│  • categories.writing
-│    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
-│
+│    ◦ fallback_models: opencode/deepseek-v4-flash-free, opencode/north-mini-code-free, opencode/big-pickle
+│  • ...(remaining 19 agents and categories follow the same pattern)
 │
 ◇  Choosing to apply will:
 │  • Move existing file to: /project/.opencode/oh-my-openagent.jsonc.pre-recommend
@@ -327,7 +61,7 @@ Ok to proceed? (y)
 |------|---------|-------|-------------|
 | `--cloud-only` | `false` | `--exclude-local` | Skip GPU detection, Ollama, and all local model discovery. Only cloud providers are considered. |
 | `--local-only` | `false` | `--exclude-cloud` | Skip cloud model discovery and API provider checks. Only local/Ollama models are considered. |
-| `--exclude-model <ref>` | — | — | Exclude a specific model reference from consideration. Repeatable. |
+| `--exclude-model <ref>` | — | — | Exclude a specific model reference from consideration. Repeatable. Format: `provider` (excludes all models from that provider) or `provider/model` (excludes a single model). |
 
 ### Exclusion Flags
 
@@ -335,7 +69,7 @@ Ok to proceed? (y)
 |------|---------|-------------|
 | `--exclude-free` | `false` | Exclude free/open-source models from the final JSONC configuration output. Free models are included by default. |
 | `--no-exclude-free` | `false` | Negation of `--exclude-free`. Ensures free models are allowed in the final JSONC configuration. |
-| `--free-config` | `true` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
+| `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
 | `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
 
 ### Behavior Flags
@@ -343,6 +77,7 @@ Ok to proceed? (y)
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--yes`, `-y` | `false` | Apply all recommendations without interactive confirmation. Required for non-interactive/CI environments to proceed past preview. |
+| `--no-yes` | `false` | Negation of `--yes`. Explicitly prevents auto-apply even in non-TTY environments. Useful when you want a dry-run preview in CI but the default `--yes` inference is too aggressive. |
 | `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
@@ -400,6 +135,31 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 
 ---
 
+### Provider probing and state tracking
+
+Before any recommendation is made, the tool probes each discovered AI provider for availability and rate-limit status:
+
+- **State tracking** (`lib/providers/state.js`) — each provider is tracked in a state machine with statuses: `available`, `rate-limited`, `quota-exhausted`, or `error`.
+- **Probe logic** (`lib/providers/probe.js`) — each provider's models are tested with lightweight requests, measuring response time and HTTP status.
+- **Error classification** (`lib/providers/errors.js`) — 402 (quota) and 429 (rate-limit) responses are identified; `Retry-After` headers are parsed for backoff.
+- **Provider-level debarment** — a provider that fails probing is excluded from all recommendation stages for the duration of the run.
+
+Probing runs concurrently across all discovered providers. The results feed into both the deterministic rule-chain matcher and the AI ranking stage, ensuring that unavailable or exhausted providers never appear in the final config.
+
+### Three‑stage matching pipeline
+
+When the upstream rule chain (deterministic lookup) cannot find a match for an entry, the tool falls through a three‑stage pipeline before reaching the AI ranking system:
+
+| Stage | Strategy | Trigger | File |
+|-------|----------|---------|------|
+| **1 — Deterministic** | Semantic matching against provider model metadata | Always attempted first | `lib/recommend/model-matching.js` (`MATCH_STRATEGIES.DETERMINISTIC`) |
+| **2 — Machine‑readable** | Fuzzy/structural matching against model specs | Runs only if Stage 1 finds nothing | `lib/recommend/model-matching.js` (`MATCH_STRATEGIES.MACHINE_READABLE`) |
+| **3 — AI stub** | Lightweight in‑process AI matcher | Runs only if Stages 1‑2 find nothing | `lib/ai-matcher.js` via `rules-assignment.js` |
+
+Each stage uses a different `matchModel()` strategy from `lib/recommend/model-matching.js`. The stages are cascading: the first stage that produces matches wins; if all three fail, the entry falls through to the full AI ranking system described below.
+
+---
+
 ## 🚦 When should you actually run this?
 
 1. **You just bought a new GPU** 
@@ -421,6 +181,8 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 * **Cloud inventory**
 
     The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for rule-chain matching.
+
+    For select providers (e.g., OpenRouter), the tool also fetches their **live model catalog** via HTTPS (`https://openrouter.ai/api/v1/models`) to supplement locally cached models. This catalog is fetched at startup and merged into the candidate pool before scoring.
 * **Local inventory**
 
     If local discovery is enabled, the tool checks GPU/VRAM and Ollama, normalizes installed and cached Ollama models into candidate cards, infers each agent/category requirement, and ranks candidates by specialty, context support, estimated memory, parameter count, OpenRouter popularity when available, and installed-state tie-breaks. The fit budget is `gpu.vramGb * 0.90`; the active dynamic path does not subtract the old fixed 1.5 GB margin.
@@ -448,7 +210,7 @@ When the deterministic upstream rule chain cannot find matching models for an en
 
 ### Which models do the ranking
 
-The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). These are discovered at startup via `opencode models --json --include-free` and cached in `FREE_MODELS`. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
+The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). These are discovered at startup via `opencode models opencode` (positional argument, not `--json --include-free`) and cached in `FREE_MODELS`. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
 
 These free models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
 
@@ -512,3 +274,39 @@ or, if all AI calls failed:
 ### AI analysis is additive, not exclusive
 
 The AI ranking **only** runs for entries where the upstream rule chain could not find a match. Entries with a valid rule-chain match (`rec.ruleChainMatched === true`) are printed as skipped and keep their deterministic assignment. The AI ranking thus fills gaps in the rule chain rather than replacing it, ensuring deterministic behavior for well-covered entries and AI-driven selection for uncovered ones.
+
+---
+
+## 🔧 Validating Configuration: `omo-validate-config`
+
+`omo-validate-config` is a companion subcommand that validates an existing `oh-my-openagent.jsonc` file against upstream OpenCode configuration schema requirements.
+
+```bash
+npx omo-validate-config
+# or pointing to a specific file:
+npx omo-validate-config --config /path/to/oh-my-openagent.jsonc
+```
+
+### What it checks
+
+- **Provider/model reference syntax** — every `provider/model` string is parsed and validated.
+- **Schema compliance** — the config is validated against the oh-my-openagent JSON schema.
+- **Required fields** — agents and categories must have valid `model` and optional `fallback_models` arrays.
+- **File readability** — the config file must be valid JSONC.
+
+### When to use
+
+- After manually editing `oh-my-openagent.jsonc` to verify correctness before running opencode.
+- In CI pipelines to catch config drift before deployment.
+- After running `omo-recommend-models` with unexpected results.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Config is valid |
+| `1` | Config failed validation (details printed to stderr) |
+
+### Validation rollback
+
+When `omo-recommend-models --yes` fails validation after writing a new config (e.g., due to upstream schema changes or corruption during write), the tool automatically restores the **backup** from `.opencode/oh-my-openagent.jsonc.pre-recommend`. This ensures the CLI never leaves a broken config in place.
