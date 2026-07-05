@@ -67,7 +67,7 @@ Output (abridged — actual output varies by hardware and provider availability)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
+| `--free-config` | `true` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
 | `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
 
 ### Behavior Flags
