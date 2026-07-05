@@ -25,8 +25,6 @@ test("parseCliOptions preserves negated option intent", () => {
     "--no-remove-orphans",
     "--no-apply",
     "--no-free-config",
-    "--no-exclude-free",
-    "--no-yes",
   ]);
 
   assert.equal(result.install, false);
@@ -34,8 +32,6 @@ test("parseCliOptions preserves negated option intent", () => {
   assert.equal(result["remove-orphans"], false);
   assert.equal(result.apply, false);
   assert.equal(result._noFreeConfigExplicit, true);
-  assert.equal(result._noExcludeFreeExplicit, true);
-  assert.equal(result._explicitYes, false);
 });
 
 test("parseCliOptions exposes help and version flags without exiting", () => {

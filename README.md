@@ -67,8 +67,6 @@ Output (abridged — actual output varies by hardware and provider availability)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--exclude-free` | `false` | Exclude free/open-source models from the final JSONC configuration output. Free models are included by default. |
-| `--no-exclude-free` | `false` | Negation of `--exclude-free`. Ensures free models are allowed in the final JSONC configuration. |
 | `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
 | `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
 
@@ -77,7 +75,6 @@ Output (abridged — actual output varies by hardware and provider availability)
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--yes`, `-y` | `false` | Apply all recommendations without interactive confirmation. Required for non-interactive/CI environments to proceed past preview. |
-| `--no-yes` | `false` | Negation of `--yes`. Explicitly prevents auto-apply even in non-TTY environments. Useful when you want a dry-run preview in CI but the default `--yes` inference is too aggressive. |
 | `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
@@ -112,7 +109,7 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 ── Model Considerations & Exclusions ──
   • Local / Ollama models excluded via --exclude-local
   • Cloud / paid models considered
-  • Free models excluded via --exclude-free
+  • Free models excluded via --no-free-config
   • Free models considered for JSONC configuration
 ```
 

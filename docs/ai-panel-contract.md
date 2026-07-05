@@ -54,7 +54,7 @@ The following flags are part of the reachable AI Panel surface:
 - `--exclude-agy` / `--exclude-agy-cli`
 - `--exclude-opencode` / `--exclude-opencode-cli`
 
-The final JSONC output can also be affected by shared config flags such as `--exclude-free`, `--no-free-config`, `--cloud-only`, `--local-only`, `--no-install`, and `--no-apply`.
+The final JSONC output can also be affected by shared config flags such as `--no-free-config`, `--no-free-config`, `--cloud-only`, `--local-only`, `--no-install`, and `--no-apply`.
 
 ## Current Limits
 

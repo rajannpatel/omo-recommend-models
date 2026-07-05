@@ -50,7 +50,7 @@ omo-recommend/
 - Subprocess execution must use argument arrays instead of raw shell command strings to prevent shell escaping issues.
 - Non-interactive/non-TTY execution defaults to dry-run mode, printing proposed updates without applying unless `--yes` or `-y` is passed.
 - Built-in upstream model matching follows `packages/model-core/src/agent-model-requirements.ts` and `packages/model-core/src/category-model-requirements.ts` from `code-yeongyu/oh-my-openagent` `dev`.
-- Free OpenCode models are allowed in config by default. Use `--exclude-free` or `--no-free-config` only when the user explicitly wants them removed.
+- Free OpenCode models are allowed in config by default. Use `--no-free-config` only when the user explicitly wants them removed.
 - Provider availability is not enough for assignment. Advertised model refs must be probed; reject only the failing `provider/model` ref while keeping other available refs from that provider eligible.
 
 ## ANTI-PATTERNS (THIS PROJECT)
