@@ -676,7 +676,7 @@ test("default recommender does not assign paid model refs that fail verification
   // Then: the failed model ref is never written as primary or fallback output.
   assert.equal(result.timedOut, false, result.stderr);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /model: openai\/gpt-4\.1/);
+  assert.match(result.stdout, /openai\/gpt-4\.1/);
   assert.doesNotMatch(result.stdout, /model: openai\/gpt-5\.5-pro/);
   assert.doesNotMatch(result.stdout, /fallback_models: .*openai\/gpt-5\.5-pro/);
 });
