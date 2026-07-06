@@ -89,6 +89,8 @@ Output (abridged — actual output varies by hardware and provider availability)
 | `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
+| `--agy-analysis` | `false` | Skip the `opencode models` free AI models and instead use AGY in the CLI terminal to run the AI analysis of each OmO agent/category model. |
+| `--codex-analysis` | `false` | Skip the `opencode models` free AI models and instead use Codex in the CLI terminal to run the AI analysis of each OmO agent/category model. |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
 
 ### Opt-Out Flags (Enabled by Default)
@@ -221,6 +223,9 @@ When the deterministic upstream rule chain cannot find matching models for an en
 The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). These are discovered at startup via `opencode models opencode` (positional argument, not `--json --include-free`) and cached in `FREE_MODELS`. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
 
 These free models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
+
+> [!NOTE]
+> If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the free OpenCode models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to run the AI analysis for each agent/category model.
 
 ### What information is sent to the AI
 

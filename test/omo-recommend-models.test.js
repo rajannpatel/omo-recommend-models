@@ -1102,3 +1102,98 @@ test("cloud-only yes applies cloud model recommendations", async (t) => {
   assert.match(result.stdout, /✓\s+•\s+\d+ section\(s\) updated/);
   assert.match(result.stdout, /✓\s+Done/);
 });
+
+test("agy-analysis parameter executes agy tool and uses results", async (t) => {
+  const harness = createHarness(t, {
+    agy: true,
+    agyOptions: {
+      output: `JSON.stringify({"oracle": ["opencode/north-mini-code-free", "opencode/big-pickle", "opencode/nemotron-3-ultra-free"]}) + "\\n"`
+    },
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+          { id: "nemotron-3-ultra-free", family: "opencode-nemotron", context_length: 32000 },
+        ],
+      },
+    },
+    config: defaultConfig({
+      root: {
+        agents: {
+          oracle: {
+            description: "Oracle agent",
+            fallback_models: [],
+          },
+        },
+      },
+    }),
+  });
+
+  const result = await runCli(harness.env, "", ["--cloud-only", "-y", "--agy-analysis"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /✓\s+processed\s+1\/1\s+agent\.oracle\s+by\s+cli\/agy/);
+  assert.match(result.stdout, /AI ranking 1: 1\/1 ranked using\n│\s+•\s+cli\/agy/);
+
+  // Check that agy was invoked
+  const cliLogPath = path.join(harness.tempDir, "cli-args.log");
+  assert.ok(fs.existsSync(cliLogPath), "cli-args.log should exist");
+  const cliCalls = fs.readFileSync(cliLogPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const agyCall = cliCalls.find((entry) => entry.tool === "agy" && entry.args.includes("--print"));
+  assert.ok(agyCall, "expected agy call with --print");
+  assert.ok(agyCall.args.includes("--dangerously-skip-permissions"), "expected skip permissions");
+});
+
+test("codex-analysis parameter executes codex tool and uses results", async (t) => {
+  const harness = createHarness(t, {
+    codex: true,
+    codexOptions: {
+      output: `JSON.stringify({"oracle": ["opencode/north-mini-code-free", "opencode/big-pickle", "opencode/nemotron-3-ultra-free"]}) + "\\n"`
+    },
+    providerCache: {
+      models: {
+        opencode: [
+          { id: "big-pickle", family: "opencode-big-pickle", context_length: 200000 },
+          { id: "north-mini-code-free", family: "opencode-north", context_length: 32000 },
+          { id: "nemotron-3-ultra-free", family: "opencode-nemotron", context_length: 32000 },
+        ],
+      },
+    },
+    config: defaultConfig({
+      root: {
+        agents: {
+          oracle: {
+            description: "Oracle agent",
+            fallback_models: [],
+          },
+        },
+      },
+    }),
+  });
+
+  const result = await runCli(harness.env, "", ["--cloud-only", "-y", "--codex-analysis"], 12000);
+
+  assert.equal(result.timedOut, false, result.stderr);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /✓\s+processed\s+1\/1\s+agent\.oracle\s+by\s+cli\/codex/);
+  assert.match(result.stdout, /AI ranking 1: 1\/1 ranked using\n│\s+•\s+cli\/codex/);
+
+  // Check that codex was invoked
+  const cliLogPath = path.join(harness.tempDir, "cli-args.log");
+  assert.ok(fs.existsSync(cliLogPath), "cli-args.log should exist");
+  const cliCalls = fs.readFileSync(cliLogPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const codexCall = cliCalls.find((entry) => entry.tool === "codex" && entry.args.includes("exec"));
+  assert.ok(codexCall, "expected codex call with exec");
+  assert.ok(codexCall.args.includes("--skip-git-repo-check"), "expected skip git repo check");
+  assert.ok(codexCall.args.includes("--dangerously-bypass-approvals-and-sandbox"), "expected skip sandbox check");
+});
