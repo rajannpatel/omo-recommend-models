@@ -6,7 +6,10 @@ A CLI utility for OpenCode + OmO that profiles your hardware and generates a bas
 
 
 
-https://github.com/user-attachments/assets/fc31a48c-8cdc-44de-a599-c3a086d45e57
+
+
+https://github.com/user-attachments/assets/cd619621-adc9-4523-a87b-b82fbac71352
+
 
 
 
