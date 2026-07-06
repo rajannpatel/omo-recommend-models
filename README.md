@@ -2,7 +2,9 @@
 
 A CLI utility for OpenCode + OmO that profiles your hardware and generates a baseline, static configuration file with fallback models enabled by default for each agent. If you are rate limited on a model, or if an AI provider is quota exhausted, the AI model fallback for the oh-my-openagent AI harness in opencode will retry models from other providers automatically. If the automatic retry fails, you can resume without losing context by typing "continue".
 
+
 https://github.com/user-attachments/assets/bce0fdeb-41d5-4e83-bb37-3c39c8d3bd3d
+
 
 > [!TIP]
 > This tool generates a *point-in-time snapshot* of model recommendations. It enables dynamic API routing, and will help you navigate real-time API quota rejections when using opencode with oh-my-opencode (OmO). Use this tool to get your initial bearings, or to recalibrate when you add more AI models to opencode, then let OmO handle the actual execution.
