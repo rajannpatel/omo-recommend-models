@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { completeAiRecommendations } from "../../lib/recommend/recommendation-finalizer.js";
+import { addMissingCloudFallbacks } from "../../lib/recommend/finalizer/cloud-runtime.js";
 
 test("completeAiRecommendations appends context-selected local fallbacks local-last with decisions", () => {
   // Given: two entries whose context-selected locals differ from the old global best local model.
@@ -272,4 +273,34 @@ test("completeAiRecommendations preserves ruleChainMatched flag through finaliza
 
   const [rec] = completed.cloudRecommendations;
   assert.equal(rec.ruleChainMatched, true);
+});
+
+test("addMissingCloudFallbacks adds only one best model per provider", () => {
+  const cloudLookup = {
+    byId: {
+      opencode: new Map([
+        ["big-pickle", { capabilities: { toolcall: true }, context_length: 200000 }],
+        ["north-mini-code-free", { capabilities: { toolcall: true }, context_length: 32000 }],
+        ["nemotron-3-ultra-free", { capabilities: { toolcall: true }, context_length: 32000 }],
+      ]),
+    },
+    sets: {},
+  };
+  const rec = {
+    name: "sisyphus",
+    type: "agent",
+    model: null,
+    fallback_models: [],
+  };
+  const providerSets = {
+    configuredProviders: new Set(),
+    fallbackProviders: new Set(),
+  };
+  const cloudProviders = [["opencode", cloudLookup.byId.opencode]];
+
+  addMissingCloudFallbacks(rec, providerSets, cloudProviders, cloudLookup, () => true);
+
+  // Only one model per provider should be added, not all available models
+  assert.equal(rec.fallback_models.length, 1);
+  assert.equal(rec.fallback_models[0].provider, "opencode");
 });

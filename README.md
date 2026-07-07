@@ -154,7 +154,14 @@ Before any recommendation is made, the tool probes each discovered AI provider f
 - **Error classification** (`lib/providers/errors.js`) — 402 (quota) and 429 (rate-limit) responses are identified; `Retry-After` headers are parsed for backoff.
 - **Provider-level debarment** — a provider that fails probing is excluded from all recommendation stages for the duration of the run.
 
-Probing runs concurrently across all discovered providers. The results feed into both the deterministic rule-chain matcher and the AI ranking stage, ensuring that unavailable or exhausted providers never appear in the final config.
+#### Efficient Probing Architecture & Concurrency Control
+- **Single-Call Diagnosis**: Rather than making multiple separate diagnostic calls, the tool makes exactly **one lightweight test call (`say 1`)** to each tested model. We inspect the success status or the resulting error output of this single invocation to gather all reachability, rate limiting, billing quota, and guardrail/data policy restrictions in one go.
+- **Sequential Execution**: To prevent CPU/memory strain and database or file-locking conflicts when spawning subprocesses, provider probes are run **sequentially** (maximum of 1 concurrent `opencode` subprocess).
+- **Intelligent Short-Circuiting**: If a model probe fails with a true quota-exhausted error (e.g. HTTP 402, billing limit, insufficient funds), the entire provider is immediately marked as credit-exhausted (`quota-exceeded`). When the sequential loop moves to check subsequent models from the same provider, it checks the provider's status first and **short-circuits instantly** without spawning any new subprocesses.
+- **Model-Specific Resiliency**: Model-specific authorization errors, access denials, and generic restrictions (e.g., `"unauthorized"`, `"forbidden"`, `"restricted"`, `"access denied"`) are handled gracefully and isolated to the failing model. They do not trigger global provider-level credit exhaustion or short-circuiting, allowing other viable models from that provider (like OpenRouter) to be successfully probed and utilized.
+
+
+The results feed into both the deterministic rule-chain matcher and the AI ranking stage, ensuring that unavailable or exhausted providers never appear in the final config.
 
 ### Three‑stage matching pipeline
 
@@ -226,6 +233,44 @@ These free models are queried **only for ranking other models' fitness**. They a
 
 > [!NOTE]
 > If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the free OpenCode models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to run the AI analysis for each agent/category model.
+
+### Evaluator Models vs. Target Models (Account Separation)
+
+When utilizing `--agy-analysis` or `--codex-analysis` for model-fitness ranking, it is important to distinguish between the **offline evaluator** and the **runtime target**:
+
+* **The Offline Evaluator:** The models returned by `agy models` (such as `Gemini 3.5 Flash`) run under your local CLI tool environment (e.g., `agy` or `codex`), which uses its own distinct accounts, credentials, and API keys. These models act purely as offline judges to process the ranking prompts.
+* **The Runtime Target:** The final configurations written to `.opencode/oh-my-openagent.jsonc` can only specify providers and models that are registered and accessible through the **OpenCode** CLI (such as `google/gemini-3.1-pro-preview` or `google/gemma-4-31b-it`). These utilize your OpenCode environment accounts and credentials. 
+
+Because the `oh-my-openagent` runtime routes its API calls entirely through OpenCode, the tool cannot write `agy` models directly into the configuration.
+
+---
+
+### Why Free Models Can Outrank or Exclude Paid Models
+
+During recommendation finalization, you may observe free OpenCode models outranking or excluding paid models (like Google or xAI) in the generated `model` and `fallback_models` fields. This happens due to the following design constraints:
+
+#### 1. Deterministic Upstream Rule Chain
+The plugin prioritizes a deterministic matching chain defined in [model-requirements.js](file:///project/lib/recommend/model-requirements.js).
+* If an agent/category matches a rule in this upstream chain (indicated by `ruleChainMatched === true`), its primary model selection is kept fixed to match that rule chain deterministically.
+* For these rule-chain matched entries, **AI ranking is skipped** to preserve stability for well-defined roles.
+* For roles like `sisyphus` (Primary orchestrator), the upstream rule chain does **not** include the `google` provider or any `gemini` models. Since the higher-tier models/providers were unavailable, `opencode/big-pickle` was deterministically assigned as the primary model.
+
+#### 2. Guaranteed Free Fallbacks
+To protect against paid API quota exhaustion or rate limits, the tool explicitly guarantees at least two free `opencode` models in the fallback chain. 
+* The system populates these free fallback models *first* (via `withMinimumFreeFallbacks`).
+* Other available paid provider models (such as `xai/grok-4.20-0309-reasoning` or `google` models) are appended afterward, placing them at the bottom of the list.
+
+#### 3. Per-Provider Paid Model Limits
+For agents/categories where a Google model (like `google/gemini-3.1-pro-preview`) is the primary model:
+* The finalizer enforces a strict constraint of **at most one non-free model per provider** across the entire recommendation (model + fallbacks combined). This prevents multiple paid slots from being occupied by the same provider.
+* Because the primary model occupies the paid slot for `google`, any other Google model (like `google/gemma-4-31b-it`) is filtered out of `fallback_models`. Free `opencode` models are exempt from this limit, which is why they remain.
+
+#### 4. AI-Ranked Entries Respect Provider Constraints
+For entries that do not match the rule chain (like `hephaestus` or `sysadmin`), AI ranking is performed:
+* If the agent has strict provider requirements (e.g. `hephaestus` requires providers from `["openai", "github-copilot", "opencode", "vercel"]`), the AI respects this constraint and ranks `google` or `xai` models at the bottom, even if they are higher-quality models generally.
+* For the remaining matching providers, free models with larger context windows (like `opencode/nemotron-3-ultra-free` with `1000K` context) are naturally preferred by the AI for task-heavy roles.
+
+---
 
 ### What information is sent to the AI
 

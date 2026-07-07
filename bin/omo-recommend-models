@@ -4,4 +4,12 @@ import {
   runRecommendModelsCli,
 } from "../lib/cli/recommend-models.js";
 
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", reason instanceof Error ? reason.message : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err.message);
+  process.exitCode = 1;
+});
+
 runRecommendModelsCli().catch(handleRecommendModelsFatalError);

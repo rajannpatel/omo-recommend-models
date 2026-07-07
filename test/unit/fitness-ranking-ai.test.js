@@ -86,10 +86,9 @@ test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-ch
     ruleChainEntryOriginal.fallback_models,
     "ruleChainMatched entry fallback_models must remain unchanged",
   );
-  assert.equal(
+  assert.ok(
     ruleChainEntry.aiUsedModel,
-    undefined,
-    "ruleChainMatched entry must not acquire aiUsedModel",
+    "ruleChainMatched entry should have aiUsedModel set for output display",
   );
 
   // Non-rule-chain entries must be ranked by AI, with model attribution

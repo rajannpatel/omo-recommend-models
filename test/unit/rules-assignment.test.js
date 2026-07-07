@@ -403,7 +403,8 @@ test("end-to-end ruleChainMatched pipeline: createRuleBasedRecommendations → c
   const finalRefs = new Set(finalSisyphus.fallback_models.map(f => `${f.provider}/${f.model}`));
   assert.deepEqual([...finalRefs].sort(), [...originalRefs].sort(),
     "ruleChainMatched entry must keep the same set of fallback refs after ranking");
-  // aiUsedModel should NOT be set — rule-chain entries skip AI ranking
-  assert.equal(finalSisyphus.aiUsedModel, undefined,
-    "ruleChainMatched entry should NOT have aiUsedModel set — AI ranking skipped");
+  // aiUsedModel records the round-robin model selected for AI analysis even on
+  // rule-chain entries so the output can show "(ranked by <model>)" consistently.
+  assert.ok(finalSisyphus.aiUsedModel,
+    "ruleChainMatched entry must have aiUsedModel set for output display");
 });

@@ -24,10 +24,14 @@ test("rankFallbacksByFitness processes all-ruleChainMatched entries when opencod
   // When opencode binary is available, ranking succeeds. When not available, returns false.
   // Either is acceptable depending on the test environment.
   assert.ok(typeof result === "boolean");
+
+  // aiUsedModel must be set on rule-chain entries regardless of opencode availability
+  // so the output can show "(ranked by <model>)" for these entries.
+  assert.ok(ruleChainEntry.aiUsedModel, "aiUsedModel should be set even for rule-chain entries");
 });
 
 test("upstreamContext formats known agent entry", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "sisyphus", type: "agent", allModels: [] });
   assert.match(result, /1st choice:/);
   assert.match(result, /claude-opus-4-7/);
@@ -36,7 +40,7 @@ test("upstreamContext formats known agent entry", async () => {
 });
 
 test("upstreamContext formats known category entry", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "ultrabrain", type: "category", allModels: [] });
   assert.match(result, /1st choice:/);
   assert.match(result, /gpt-5\.5/);
@@ -45,43 +49,43 @@ test("upstreamContext formats known category entry", async () => {
 });
 
 test("upstreamContext returns empty string for unknown entries", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "nobody", type: "agent", allModels: [] });
   assert.equal(result, "");
 });
 
 test("upstreamContext returns fallback for sysadmin", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "sysadmin", type: "agent", allModels: [] });
   assert.match(result, /System administration/);
 });
 
 test("upstreamContext returns fallback for scout", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "scout", type: "agent", allModels: [] });
   assert.match(result, /information gathering/);
 });
 
 test("upstreamContext includes requiresAnyModel when present", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "hephaestus", type: "agent", allModels: [] });
   assert.match(result, /requires: any model from chain/);
 });
 
 test("upstreamContext includes requiresProvider when present", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "hephaestus", type: "agent", allModels: [] });
   assert.match(result, /requires: model from/);
 });
 
 test("upstreamContext returns empty string for unknown category", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "imaginary", type: "category", allModels: [] });
   assert.equal(result, "");
 });
 
 test("upstreamContext shows multiple chain tiers for sisyphus", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "sisyphus", type: "agent", allModels: [] });
   assert.match(result, /1st choice:/);
   assert.match(result, /2nd choice:/);
@@ -89,7 +93,7 @@ test("upstreamContext shows multiple chain tiers for sisyphus", async () => {
 });
 
 test("upstreamContext shows providers list for each tier", async () => {
-  const { upstreamContext } = await import("../../lib/recommend/fitness-ranking.js");
+  const { upstreamContext } = await import("../../lib/recommend/fitness/prompt-builder.js");
   const result = upstreamContext({ name: "librarian", type: "agent", allModels: [] });
   assert.match(result, /from /);
   assert.match(result, /openai/);
