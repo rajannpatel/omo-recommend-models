@@ -1,6 +1,6 @@
 {
   "name": "omo-recommend-models",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Deterministic model recommendation CLI for OpenCode OMO agent configurations",
   "type": "module",
   "bin": {
