@@ -12,6 +12,7 @@ function successfulChild() {
       type: "text",
       part: { text: "1" },
     })}\n`));
+    child.stderr.emit("data", Buffer.from("provider warning\n"));
     child.emit("close", 0);
   });
   return child;
@@ -51,4 +52,21 @@ test("probeModel keeps normal-mode child events out of the presentation stream",
 
   assert.deepEqual(value, { ok: true });
   assert.equal(output, "");
+});
+
+test("probeModel exposes its command and complete streams in verbose mode", async () => {
+  const { RuntimeContext } = await import("../../lib/runtime-context.js");
+  const { probeModel } = await import("../../lib/providers/probe.js");
+  const ctx = new RuntimeContext();
+  ctx.verboseMode = true;
+
+  const { output, value } = await captureStdout(() =>
+    probeModel(ctx, "openai/gpt-5.5"),
+  );
+
+  assert.deepEqual(value, { ok: true });
+  assert.match(output, /┌  \[exec\] opencode run/);
+  assert.match(output, /│  \[stdout\] .*"type":"text"/);
+  assert.match(output, /│  \[stderr\] provider warning/);
+  assert.match(output, /└\n┌\n│\n$/);
 });

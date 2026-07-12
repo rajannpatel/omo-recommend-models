@@ -15,6 +15,7 @@ function childFor(args) {
         type: "text",
         part: { text: "ranked" },
       })}\n`));
+      child.stderr.emit("data", Buffer.from("model warning\n"));
     }
     child.emit("close", 0);
   });
@@ -55,4 +56,20 @@ test("callOpencode keeps normal-mode event diagnostics out of the presentation s
 
   assert.equal(value, "ranked");
   assert.equal(output, "");
+});
+
+test("callOpencode exposes the command and complete streams in verbose mode", async () => {
+  const { callOpencode } = await import(
+    "../../lib/recommend/fitness/opencode-runner.js"
+  );
+
+  const { output, value } = await captureStdout(() =>
+    callOpencode("rank this", "opencode/mimo-v2.5-free", null, { verbose: true }),
+  );
+
+  assert.equal(value, "ranked");
+  assert.match(output, /┌  \[exec\] opencode run --format json/);
+  assert.match(output, /│  \[stdout\] .*"type":"text"/);
+  assert.match(output, /│  \[stderr\] model warning/);
+  assert.match(output, /└\n┌\n│\n$/);
 });

@@ -41,14 +41,19 @@ test("parseCliOptions exposes help and version flags without exiting", () => {
   assert.match(usage(), /^Usage: omo-recommend-models \[options\]/);
 });
 
-test("parseCliOptions supports inline values and debug flag", () => {
+test("parseCliOptions keeps verbose independent from debug", () => {
   const result = parseCliOptions([
     "--exclude-model=provider/two",
     "--debug",
+    "--verbose",
   ]);
 
   assert.deepEqual(result["exclude-model"], ["provider/two"]);
   assert.equal(result.debug, true);
+  assert.equal(result.verbose, true);
+  assert.equal(parseCliOptions([]).verbose, false);
+  assert.match(usage(), /--verbose\s+Show executed commands/);
+  assert.throws(() => parseCliOptions(["--verbose=true"]), /does not take a value/);
 });
 
 test("parseCliOptions parses --global flag", () => {

@@ -23,6 +23,7 @@ if (args[0] === "models") {
 }
 if (args[0] === "run") {
   console.log(JSON.stringify({ type: "text", part: { text: "1" } }));
+  console.error("probe warning: complete stderr is visible in verbose mode");
   process.exit(0);
 }
 process.exit(1);
@@ -70,4 +71,50 @@ test("dry-run cloud-only CLI keeps operational records inside output groups", (t
   assert.doesNotMatch(result.stdout, /\[event:/);
   assert.doesNotMatch(result.stdout, /\r/);
   assert.doesNotMatch(result.stdout, /(?:^|\n)(?:→|\[exec])/);
+});
+
+test("--verbose frames every fake OpenCode command and restores the pretty pipe", (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "omo-recommend-verbose-"));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const configDir = path.join(workspace, ".opencode");
+  const fakeBin = path.join(workspace, "fake-bin");
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.mkdirSync(fakeBin, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, "oh-my-openagent.jsonc"),
+    JSON.stringify({ agents: { oracle: { description: "architecture" } }, categories: {} }),
+  );
+  writeFakeOpencode(path.join(fakeBin, "opencode"));
+
+  const result = spawnSync(
+    process.execPath,
+    [path.join(process.cwd(), "bin/omo-recommend-models"), "--dry-run", "--cloud-only", "--verbose"],
+    {
+      cwd: workspace,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CI: "true",
+        COLUMNS: "40",
+        HOME: workspace,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
+        TERM: "dumb",
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const frames = result.stdout.match(/┌  \[exec\][\s\S]*?\n└/g) || [];
+  assert.ok(frames.length >= 4, result.stdout);
+  for (const frame of frames) {
+    const lines = frame.split("\n");
+    assert.equal(lines.at(-1), "└");
+    for (const line of lines.slice(1, -1)) {
+      assert.match(line, /^│/, `wrapped verbose line escaped the border: ${line}`);
+    }
+  }
+  assert.match(result.stdout, /│  \[stdout\] openai\/gpt-5\.5/);
+  assert.match(result.stdout, /│  \[stderr\] probe warning:/);
+  assert.match(result.stdout, /└\n┌\n│\n(?:✓|◇)/);
+  assert.match(result.stdout, /◇  Cloud provider verification complete: 2\/2/);
 });

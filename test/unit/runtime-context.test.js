@@ -7,6 +7,7 @@ test("RuntimeContext constructor initializes all fields", () => {
   assert.ok(ctx.activeChildren instanceof Set);
   assert.equal(ctx.activeChildren.size, 0);
   assert.equal(ctx.debugMode, false);
+  assert.equal(ctx.verboseMode, false);
   assert.ok(ctx.abortController instanceof AbortController);
   assert.equal(ctx.cachedAgyPanelModel, undefined);
   assert.ok(ctx.quotaExceededProviders instanceof Set);
