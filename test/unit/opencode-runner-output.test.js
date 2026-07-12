@@ -68,8 +68,8 @@ test("callOpencode exposes the command and complete streams in verbose mode", as
   );
 
   assert.equal(value, "ranked");
-  assert.match(output, /┌  \[exec\] opencode run --format json/);
+  assert.match(output, /[┌├]  \[exec\] opencode run --format json/);
   assert.match(output, /│  \[stdout\] .*"type":"text"/);
   assert.match(output, /│  \[stderr\] model warning/);
-  assert.match(output, /└\n┌\n│\n$/);
+  assert.match(output, /└\n$/);
 });

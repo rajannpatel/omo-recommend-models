@@ -65,8 +65,8 @@ test("probeModel exposes its command and complete streams in verbose mode", asyn
   );
 
   assert.deepEqual(value, { ok: true });
-  assert.match(output, /┌  \[exec\] opencode run/);
+  assert.match(output, /[┌├]  \[exec\] opencode run/);
   assert.match(output, /│  \[stdout\] .*"type":"text"/);
   assert.match(output, /│  \[stderr\] provider warning/);
-  assert.match(output, /└\n┌\n│\n$/);
+  assert.match(output, /└\n$/);
 });

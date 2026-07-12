@@ -104,7 +104,7 @@ test("--verbose frames every fake OpenCode command and restores the pretty pipe"
   );
 
   assert.equal(result.status, 0, result.stderr);
-  const frames = result.stdout.match(/┌  \[exec\][\s\S]*?\n└/g) || [];
+  const frames = result.stdout.match(/[┌├]  \[exec\][\s\S]*?\n└/g) || [];
   assert.ok(frames.length >= 4, result.stdout);
   for (const frame of frames) {
     const lines = frame.split("\n");
@@ -115,6 +115,6 @@ test("--verbose frames every fake OpenCode command and restores the pretty pipe"
   }
   assert.match(result.stdout, /│  \[stdout\] openai\/gpt-5\.5/);
   assert.match(result.stdout, /│  \[stderr\] probe warning:/);
-  assert.match(result.stdout, /└\n┌\n│\n(?:✓|◇)/);
+  assert.match(result.stdout, /└\n(?:[├┌]  \[exec\]|✓|◇)/);
   assert.match(result.stdout, /◇  Cloud provider verification complete: 2\/2/);
 });

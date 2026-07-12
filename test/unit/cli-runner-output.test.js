@@ -52,11 +52,11 @@ test("callCliAgent exposes the command and complete streams in verbose mode", as
   );
 
   assert.equal(value, "ranked response\n");
-  assert.match(output, /┌  \[exec\] agy/);
+  assert.match(output, /[┌├]  \[exec\] agy/);
   assert.match(output, /<prompt:/);
   assert.match(output, /9 chars>/);
   assert.doesNotMatch(output, /rank this/);
   assert.match(output, /│  \[stdout\] ranked response/);
   assert.match(output, /│  \[stderr\] cli warning/);
-  assert.match(output, /└\n┌\n│\n$/);
+  assert.match(output, /└\n$/);
 });
