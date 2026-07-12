@@ -1,16 +1,20 @@
-import { mock } from "node:test";
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 
 // Mock child_process to prevent actual opencode execution during unit tests.
 import { EventEmitter } from "node:events";
 
-function mockSpawnResponse(stdoutText) {
+const opencodePrompts = [];
+const spawnCalls = [];
+
+function mockSpawnResponse(stdoutText, onPrompt = null) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.stdin = { write: () => {}, end: () => {} };
-  child.stdin.write = () => {};
+  child.stdin.write = (chunk) => {
+    if (onPrompt) onPrompt(String(chunk));
+  };
   child.stdin.end = () => {};
   process.nextTick(() => {
     child.stdout.emit("data", Buffer.from(stdoutText));
@@ -23,6 +27,7 @@ mock.module("node:child_process", {
   namedExports: {
     execFileSync: mock.fn(() => { /* other modules in import chain may need this */ }),
     spawn: mock.fn((_bin, _args, _options) => {
+      spawnCalls.push({ bin: _bin, args: _args });
       const raw = JSON.stringify({
         type: "text",
         part: {
@@ -32,10 +37,21 @@ mock.module("node:child_process", {
               "opencode/big-pickle",
               "google/gemini-2.5-pro",
             ],
+            atlas: [
+              "openai/gpt-5.5",
+              "anthropic/claude-opus-5",
+              "google/gemini-2.5-pro",
+            ],
+            smith: [
+              "google/gemini-2.5-pro",
+              "openai/gpt-5.5",
+              "anthropic/claude-opus-5",
+            ],
           }),
         },
       });
-      return mockSpawnResponse(raw + "\n");
+      const isRun = Array.isArray(_args) && _args.includes("run");
+      return mockSpawnResponse(raw + "\n", isRun ? (prompt) => opencodePrompts.push(prompt) : null);
     }),
   },
 });
@@ -142,4 +158,46 @@ test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-ch
     "gpt-5.5",
     "original unranked primary should be last fallback",
   );
+});
+
+test("rankFallbacksByFitness sends one AI prompt per non-rule-chain entry", async () => {
+  const { rankFallbacksByFitness } = await import(
+    "../../lib/recommend/fitness-ranking.js"
+  );
+
+  opencodePrompts.length = 0;
+  spawnCalls.length = 0;
+
+  const atlas = {
+    name: "atlas",
+    type: "agent",
+    model: { provider: "openai", model: "gpt-5.5" },
+    ruleChainMatched: false,
+    fallback_models: [
+      { provider: "anthropic", model: "claude-opus-5" },
+      { provider: "google", model: "gemini-2.5-pro" },
+    ],
+  };
+  const smith = {
+    name: "smith",
+    type: "agent",
+    model: { provider: "openai", model: "gpt-5.5" },
+    ruleChainMatched: false,
+    fallback_models: [
+      { provider: "anthropic", model: "claude-opus-5" },
+      { provider: "google", model: "gemini-2.5-pro" },
+    ],
+  };
+
+  const result = await rankFallbacksByFitness([atlas, smith]);
+
+  assert.equal(result, true);
+  assert.equal(opencodePrompts.length, 2, "each entry should get its own AI query");
+  assert.match(opencodePrompts[0], /## atlas \(agent\)/);
+  assert.doesNotMatch(opencodePrompts[0], /## smith \(agent\)/);
+  assert.match(opencodePrompts[1], /## smith \(agent\)/);
+  assert.doesNotMatch(opencodePrompts[1], /## atlas \(agent\)/);
+
+  const runCalls = spawnCalls.filter((call) => call.args?.includes("run"));
+  assert.equal(runCalls.length, 2, "opencode should be invoked once per entry");
 });

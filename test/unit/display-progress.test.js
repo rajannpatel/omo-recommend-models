@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createProgress } from "../../lib/display/progress.js";
+import { createProgress, writeGroupLine } from "../../lib/display/progress.js";
 
 function captureStdout(fn) {
   const originalWrite = process.stdout.write;
@@ -28,8 +28,29 @@ test("createProgress formats known-count updates and completion in non-TTY outpu
     progress.done("complete");
   });
 
-  assert.match(output, /Known API calls: complete 2\/2/);
-  assert.match(output, /\│\n$/);
+  assert.equal(
+    output,
+    "✓  Known API calls: complete 2/2 (0s)\n│\n",
+  );
+});
+
+test("createProgress keeps skipped work inside the same output group", () => {
+  const output = captureStdout(() => {
+    createProgress("Checking GPU").skip("skipped by --cloud-only");
+  });
+
+  assert.equal(
+    output,
+    "✓  Checking GPU: skipped by --cloud-only\n│\n",
+  );
+});
+
+test("writeGroupLine preserves the group prefix for multiline details", () => {
+  const output = captureStdout(() => {
+    writeGroupLine("first detail\nsecond detail");
+  });
+
+  assert.equal(output, "│  first detail\n│  second detail\n");
 });
 
 test("createProgress set clamps known-count progress at the declared total", () => {
