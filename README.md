@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/cd619621-adc9-4523-a87b-b82fbac71352
 
 ## Quick Start
 
-Run the utility in your project directory to evaluate your available providers and preview the default deterministic rule-based recommendation:
+Run the utility in your project directory to evaluate your available cloud providers and apply the default rule-based recommendation, with AI fitness ranking for eligible fallback sets, without interactive confirmation:
 
 ```bash
 $ npx omo-recommend-models --cloud-only --yes
@@ -27,28 +27,38 @@ $ npx omo-recommend-models --cloud-only --yes
 Output (abridged — actual output varies by hardware and provider availability):
 
 ```
-◇  Verifying availability for 3 cloud provider(s) — this may take ~30s...
-◇  Checking GPU: NVIDIA GeForce RTX 3070 Ti Laptop GPU (8 GB VRAM) (0s)
-◇  Checking Ollama: 1 installed model(s) (0s)
-◇  Loaded: 3 providers (live from `opencode models`) (2s)
-✓  Verifying cloud models availability: done 3/3 (30s)
-◇  AI ranking 21 agent(s)/category(ies) by model fitness — this may take ~60s...
-✓  Ranking models by AI fitness: ranked by opencode/big-pickle 1/1 (75s)
+◇  Verifying availability for <N> cloud provider(s) — this may take ~30s...
+◇  Checking GPU: skipped by --cloud-only (0s)
+◇  Checking Ollama: skipped by --cloud-only (0s)
+◇  Loaded: <N> providers (live from `opencode models`) (2s)
+◇  Cloud provider verification complete: <N>/<N>
+◇  AI ranking <M> agent(s)/category(ies) by model fitness — processed 0/<M>
+│  → librarian by opencode/big-pickle...
+│  ✓  processed  librarian by opencode/big-pickle
+│
+◇  AI ranking complete: <ranked>/<M> ranked using
+│  • opencode/big-pickle
 
 ◇  AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/category-model-requirements.ts
 │
-│  No available rule-chain models for: hephaestus, oracle, librarian, explore, ... (17 entries)
+│  No available rule-chain models for: hephaestus, oracle, librarian, explore, ...
 │
 ◇  Recommended provider/model configurations for /project/.opencode/oh-my-openagent.jsonc:
 │  • agents.sisyphus
 │    ◦ model: opencode/big-pickle
-│    ◦ fallback_models: opencode/deepseek-v4-flash-free, opencode/north-mini-code-free, opencode/mimo-v2.5-free
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/mimo-v2.5-free
 │  • agents.oracle
 │    ◦ model: opencode/mimo-v2.5-free
-│    ◦ fallback_models: opencode/deepseek-v4-flash-free, opencode/north-mini-code-free, opencode/big-pickle
-│  • ...(remaining 19 agents and categories follow the same pattern)
+│    ◦ fallback_models:
+│      1. opencode/deepseek-v4-flash-free
+│      2. opencode/north-mini-code-free
+│      3. opencode/big-pickle
+│  • ...(remaining agents and categories follow the same pattern)
 │
 ◇  Choosing to apply will:
 │  • Move existing file to: /project/.opencode/oh-my-openagent.jsonc.pre-recommend
@@ -57,7 +67,7 @@ Output (abridged — actual output varies by hardware and provider availability)
 ✓  • Backup saved to /project/.opencode/oh-my-openagent.jsonc.pre-recommend
 |  → Validating changes...
 |  • Config valid: /project/.opencode/oh-my-openagent.jsonc
-✓  • 21 section(s) updated.
+✓  • <N> section(s) updated.
 |
 ✓  Done.
 ```
@@ -78,8 +88,8 @@ Output (abridged — actual output varies by hardware and provider availability)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--free-config` | `true` | Compatibility flag. Free models are already included in the JSONC configuration by default. |
-| `--no-free-config` | `false` | Negation of `--free-config`. Exclude free models from JSONC configuration. |
+| `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration unless `--no-free-config` is passed. |
+| `--no-free-config` | `false` | Negation of `--free-config`. Exclude `opencode/*` free models from JSONC configuration output. |
 
 ### Behavior Flags
 
@@ -89,9 +99,10 @@ Output (abridged — actual output varies by hardware and provider availability)
 | `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
-| `--agy-analysis` | `false` | Skip the `opencode models` free AI models and instead use AGY in the CLI terminal to run the AI analysis of each OmO agent/category model. |
-| `--codex-analysis` | `false` | Skip the `opencode models` free AI models and instead use Codex in the CLI terminal to run the AI analysis of each OmO agent/category model. |
+| `--agy-analysis` | `false` | Skip the `opencode models` free AI models and instead use AGY in the CLI terminal to rank eligible non-rule-chain fallback sets. |
+| `--codex-analysis` | `false` | Skip the `opencode models` free AI models and instead use Codex in the CLI terminal to rank eligible non-rule-chain fallback sets. |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
+| `--verbose` | `false` | Show executed commands and complete subprocess output. |
 
 ### Opt-Out Flags (Enabled by Default)
 
@@ -122,7 +133,7 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 ── Model Considerations & Exclusions ──
   • Local / Ollama models excluded via --exclude-local
   • Cloud / paid models considered
-  • Free models excluded via --no-free-config
+  • OpenCode free models excluded via --no-free-config
   • Free models considered for JSONC configuration
 ```
 
@@ -141,7 +152,7 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
     Writes a baseline `oh-my-openagent.jsonc` file with valid syntax, canonical `provider/model` references, cloud fallbacks, and local fallbacks when they are confirmed installed or explicitly installed during the run.
 * **It configures oh-my-opencode to proceed, despite rate limits or quota exhaustion in preferred AI Providers**
   
-    If a provider runs out of credits mid-task, the `fallback_models: []` array is used by OmO with 60 second timeout intervals. 400 (Bad Request), 402 (quota exhaustion) and 429 (too many requests), 503 (service unavailable) and 529 (site is overloaded) errors result in automatic failover at runtime.
+    If a provider runs into a retryable runtime error mid-task, the `fallback_models: []` array is used by OmO with 60 second timeout intervals. 400 (Bad Request), 429 (too many requests), 500, 502, 503, 504, and 529 (site is overloaded) errors result in automatic failover at runtime.
 
 ---
 
@@ -149,16 +160,16 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 
 Before any recommendation is made, the tool probes each discovered AI provider for availability and rate-limit status:
 
-- **State tracking** (`lib/providers/state.js`) — each provider is tracked in a state machine with statuses: `available`, `rate-limited`, `quota-exhausted`, or `error`.
-- **Probe logic** (`lib/providers/probe.js`) — each provider's models are tested with lightweight requests, measuring response time and HTTP status.
+- **State tracking** (`lib/providers/state.js`) — each provider records whether credits are exhausted, whether it is rate-limited until a future timestamp, and the reason for that state; availability is computed from those fields and the active exclusion options.
+- **Probe logic** (`lib/providers/probe.js`) — selected provider/model candidates are tested with lightweight requests, measuring response time and HTTP status. OpenRouter and OpenCode can probe multiple models; other providers start with the highest-ranked candidate and stop after the first successful probe or terminal non-availability failure.
 - **Error classification** (`lib/providers/errors.js`) — 402 (quota) and 429 (rate-limit) responses are identified; `Retry-After` headers are parsed for backoff.
-- **Provider-level debarment** — a provider that fails probing is excluded from all recommendation stages for the duration of the run.
+- **Provider and model exclusion** — quota-exhausted or currently rate-limited providers are excluded according to the active exclusion options, while some model-specific probe failures reject only the failing `provider/model` ref.
 
 #### Efficient Probing Architecture & Concurrency Control
 - **Single-Call Diagnosis**: Rather than making multiple separate diagnostic calls, the tool makes exactly **one lightweight test call (`say 1`)** to each tested model. We inspect the success status or the resulting error output of this single invocation to gather all reachability, rate limiting, billing quota, and guardrail/data policy restrictions in one go.
 - **Sequential Execution**: To prevent CPU/memory strain and database or file-locking conflicts when spawning subprocesses, provider probes are run **sequentially** (maximum of 1 concurrent `opencode` subprocess).
-- **Intelligent Short-Circuiting**: If a model probe fails with a true quota-exhausted error (e.g. HTTP 402, billing limit, insufficient funds), the entire provider is immediately marked as credit-exhausted (`quota-exceeded`). When the sequential loop moves to check subsequent models from the same provider, it checks the provider's status first and **short-circuits instantly** without spawning any new subprocesses.
-- **Model-Specific Resiliency**: Model-specific authorization errors, access denials, and generic restrictions (e.g., `"unauthorized"`, `"forbidden"`, `"restricted"`, `"access denied"`) are handled gracefully and isolated to the failing model. They do not trigger global provider-level credit exhaustion or short-circuiting, allowing other viable models from that provider (like OpenRouter) to be successfully probed and utilized.
+- **Intelligent Short-Circuiting**: If a model probe fails with a true quota-exhausted error (e.g. HTTP 402, billing limit, insufficient funds), non-OpenRouter/non-OpenCode providers are marked credit-exhausted (`quota-exceeded`). When the sequential loop moves to check subsequent models from that provider, it checks the provider's status first and **short-circuits instantly** without spawning any new subprocesses.
+- **Model-Specific Resiliency**: Model-specific unavailable-model and policy/guardrail failures are isolated to the failing model. Authorization and quota-like failures can still mark non-OpenRouter/non-OpenCode providers unavailable, while OpenRouter/OpenCode keep those failures scoped more narrowly so other viable models from the provider can still be probed and used.
 
 
 The results feed into both the deterministic rule-chain matcher and the AI ranking stage, ensuring that unavailable or exhausted providers never appear in the final config.
@@ -171,9 +182,9 @@ When the upstream rule chain (deterministic lookup) cannot find a match for an e
 |-------|----------|---------|------|
 | **1 — Deterministic** | Semantic matching against provider model metadata | Always attempted first | `lib/recommend/model-matching.js` (`MATCH_STRATEGIES.DETERMINISTIC`) |
 | **2 — Machine‑readable** | Fuzzy/structural matching against model specs | Runs only if Stage 1 finds nothing | `lib/recommend/model-matching.js` (`MATCH_STRATEGIES.MACHINE_READABLE`) |
-| **3 — AI stub** | Lightweight in‑process AI matcher | Runs only if Stages 1‑2 find nothing | `lib/ai-matcher.js` via `rules-assignment.js` |
+| **3 — AI stub** | Lightweight in‑process `findClosestMatch()` matcher | Runs only if Stages 1‑2 find nothing | `lib/ai-matcher.js` via `rules-assignment.js` |
 
-Each stage uses a different `matchModel()` strategy from `lib/recommend/model-matching.js`. The stages are cascading: the first stage that produces matches wins; if all three fail, the entry falls through to the full AI ranking system described below.
+Stages 1 and 2 use different `matchModel()` strategies from `lib/recommend/model-matching.js`; Stage 3 calls the in-process AI matcher directly. The stages are cascading: the first stage that produces matches wins; if all three fail, the entry falls through to the full AI ranking system described below.
 
 ---
 
@@ -199,7 +210,7 @@ Each stage uses a different `matchModel()` strategy from `lib/recommend/model-ma
 
     The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for rule-chain matching.
 
-    For select providers (e.g., OpenRouter), the tool also fetches their **live model catalog** via HTTPS (`https://openrouter.ai/api/v1/models`) to supplement locally cached models. This catalog is fetched at startup and merged into the candidate pool before scoring.
+    For OpenRouter, the tool can fetch live model metadata via HTTPS (`https://openrouter.ai/api/v1/models`) to identify moderated models and filter them from cached candidates before scoring.
 * **Local inventory**
 
     If local discovery is enabled, the tool checks GPU/VRAM and Ollama, normalizes installed and cached Ollama models into candidate cards, infers each agent/category requirement, and ranks candidates by specialty, context support, estimated memory, parameter count, OpenRouter popularity when available, and installed-state tie-breaks. The fit budget is `gpu.vramGb * 0.90`; the active dynamic path does not subtract the old fixed 1.5 GB margin.
@@ -207,7 +218,7 @@ Each stage uses a different `matchModel()` strategy from `lib/recommend/model-ma
     The local memory estimate is approximate: model weight comes from Ollama manifest layer sizes when available, then catalog metadata, and KV cache is estimated from target context and parameter count. Candidates with unsafe missing metadata are rejected instead of guessed. When no same-specialty local model fits, the CLI prints a hardware deficit warning with practical next steps such as lowering context, installing a smaller model, using `--cloud-only`, or upgrading VRAM.
 * **Rate-limit and quota filtering**
 
-    Rate-limited and quota-restricted providers are excluded once detected. If one AI model at a provider responds with a 402 or 429 error, it is excluded from the configuration. Recommendations are sanitized and sorted before being written to the JSONC configuration file.
+    Rate-limited and quota-restricted providers are excluded once detected according to provider state and exclusion options. Some probe failures reject only a specific `provider/model` ref; quota and rate-limit classifications can exclude the whole provider, with OpenRouter/OpenCode handled more narrowly. Recommendations are sanitized and sorted before being written to the JSONC configuration file.
 
 ## How `fallback_models` are determined
 
@@ -223,16 +234,16 @@ By default, the CLI starts from upstream `rules(model-core)` fallback chains. Th
 
 ## How the AI model-fitness ranking works
 
-When the deterministic upstream rule chain cannot find matching models for an entry (agent or category), the tool offloads model selection to an AI ranking process. This happens for entries where no rule-chain candidate survives provider availability filtering or exclusion rules.
+When the deterministic upstream rule chain cannot find matching models for an entry (agent or category), the tool offloads model selection to an AI ranking process. This happens only for generated recommendations where no rule-chain candidate survives provider availability filtering or exclusion rules and there is more than one fallback candidate to rank.
 
 ### Which models do the ranking
 
-The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). These are discovered at startup via `opencode models opencode` (positional argument, not `--json --include-free`) and cached in `FREE_MODELS`. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
+The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). The tool first discovers zero-cost, tool-call-capable models from local/project model catalogs, then falls back to `opencode models opencode` when needed. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
 
 These free models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
 
 > [!NOTE]
-> If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the free OpenCode models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to run the AI analysis for each agent/category model.
+> If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the free OpenCode evaluator models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to rank eligible entries: non-rule-chain recommendations with more than one fallback candidate.
 
 ### Evaluator Models vs. Target Models (Account Separation)
 
@@ -250,15 +261,16 @@ Because the `oh-my-openagent` runtime routes its API calls entirely through Open
 During recommendation finalization, you may observe free OpenCode models outranking or excluding paid models (like Google or xAI) in the generated `model` and `fallback_models` fields. This happens due to the following design constraints:
 
 #### 1. Deterministic Upstream Rule Chain
-The plugin prioritizes a deterministic matching chain defined in [model-requirements.js](file:///project/lib/recommend/model-requirements.js).
+The plugin prioritizes a deterministic matching chain defined in [model-requirements.js](lib/recommend/model-requirements.js).
 * If an agent/category matches a rule in this upstream chain (indicated by `ruleChainMatched === true`), its primary model selection is kept fixed to match that rule chain deterministically.
 * For these rule-chain matched entries, **AI ranking is skipped** to preserve stability for well-defined roles.
 * For roles like `sisyphus` (Primary orchestrator), the upstream rule chain does **not** include the `google` provider or any `gemini` models. Since the higher-tier models/providers were unavailable, `opencode/big-pickle` was deterministically assigned as the primary model.
 
-#### 2. Guaranteed Free Fallbacks
-To protect against paid API quota exhaustion or rate limits, the tool explicitly guarantees at least two free `opencode` models in the fallback chain. 
-* The system populates these free fallback models *first* (via `withMinimumFreeFallbacks`).
-* Other available paid provider models (such as `xai/grok-4.20-0309-reasoning` or `google` models) are appended afterward, placing them at the bottom of the list.
+#### 2. Free Fallback Supplementation
+To protect against paid API quota exhaustion or rate limits, the tool supplements fallback chains with available free `opencode` models when allowed candidates exist.
+* Rule-chain recommendations can append free fallback models through `withMinimumFreeFallbacks` after preserving existing rule-chain and provider fallbacks.
+* Finalization also appends every allowed zero-cost, tool-call-capable cloud model after missing-provider fallback filling, so unmatched entries receive the same free fallback coverage.
+* Available paid provider models (such as `xai/grok-4.20-0309-reasoning` or `google` models) can appear before free models when they are selected by the rule chain or missing-provider fallback logic.
 
 #### 3. Per-Provider Paid Model Limits
 For agents/categories where a Google model (like `google/gemini-3.1-pro-preview`) is the primary model:
@@ -278,9 +290,9 @@ For each entry that needs ranking, the tool builds a prompt containing:
 
 - **Agent/category name and type** — e.g., `sisyphus (agent)` or `visual-engineering (category)`.
 - **Upstream rule-chain requirements** — extracted from the vendored `AGENT_MODEL_REQUIREMENTS` or `CATEGORY_MODEL_REQUIREMENTS` snapshots (mirrored from `code-yeongyu/oh-my-openagent` `dev` branch). This includes the full prioritized provider/model fallback chain with any variant, `requiresProvider`, or `requiresAnyModel` constraints.
-- **Available model pool** — every model that survived provider availability probing, rate-limit filtering, quota checks, and exclusion rules, formatted as `provider/model` strings.
+- **Available model pool** — the finalized candidate subset for that entry: its current `model` plus `fallback_models`, formatted as `provider/model` strings.
 
-The prompt asks the AI to rank **all** available models from most suitable (1) to least suitable (N) for each entry's role, considering model quality tier, provider reputation, and model-specific strengths. The AI must return a bare JSON object — no explanation or markdown.
+The prompt asks the AI to rank that entry's available candidate subset from most suitable (1) to least suitable (N), considering model quality tier, provider reputation, and model-specific strengths. The AI must return a bare JSON object — no explanation or markdown.
 
 ### How the ranking is applied
 
@@ -295,61 +307,73 @@ Any model ref the AI outputs that cannot be matched to the actual available pool
 
 ### Round-robin concurrency model
 
-All entries that need AI ranking are processed **concurrently**, with one important optimization to distribute load evenly across available free models:
+Entries that need AI ranking are processed **sequentially**, with one important optimization to rotate evenly across available evaluator models:
 
-- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads the initial ~19 queries uniformly across all available free models rather than hammering the first model with all requests.
-- **Retry with rotation**: if a model call fails (timeout, crash, invalid response) for a given entry, the entry advances to `models[(modelStart + 1) % modelCount]`, then `(modelStart + 2)`, and so on, wrapping around until either a model returns a valid ranking or all models are exhausted for that entry.
-- **Concurrency ceiling**: because each entry fires one `opencode run` call at a time (sequential retries within each entry's handler), the maximum concurrent `opencode` processes equals the number of entries being ranked. In practice this is ~19 subprocesses, each with a 120-second timeout. There is no batch limit or throttling — the OS process scheduler handles fairness.
-- **No per-model retries**: each model is tried exactly once per entry. If it fails, the entry moves to the next model immediately. There is no exponential backoff or retry within the same model. A failure is logged to stderr with the debug label `agentName@provider/model`.
-- **Fail-open**: if all models fail for an entry, the entry keeps its original heuristic ordering from the finalization pipeline. The CLI prints a summary of how many entries were ranked and which models were used.
+- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads ranking requests uniformly across available free models rather than hammering the first model with all requests.
+- **No per-entry model retry loop**: each entry receives the next available evaluator model. If that model fails or returns an invalid ranking, it is blacklisted for the rest of the run; affected recommendations keep their heuristic order after the blacklisted model is removed from primary, fallback, and routing candidates, promoting the next fallback when needed.
+- **Concurrency ceiling**: provider probes run sequentially, and AI ranking also invokes at most one evaluator subprocess at a time.
+- **Fail-open**: if all evaluator models fail, recommendations keep the finalization pipeline's heuristic ordering after blacklisted evaluator refs are filtered out. The CLI prints a summary of how many entries were ranked and which models were used.
 
 ### How the ranking process is exposed to the user
 
 During execution, the CLI prints a live progress line:
 
 ```
-◇  AI ranking 19 agent(s)/category(ies) by model fitness — processed 12/19
+◇  AI ranking <M> agent(s)/category(ies) by model fitness — processed <done>/<M>
 ```
 
-Each failed model call appends a diagnostic line to stderr:
+Each failed model call appends a diagnostic line to the grouped CLI output:
 
 ```
-  ✗ sisyphus@opencode/mimo-v2.5-free — opencode exited with code 1
+│  ✗ librarian by opencode/mimo-v2.5-free — opencode exited with code 1
 ```
 
 On completion, a summary line shows reachable models and ranking coverage:
 
 ```
-✓  AI ranking 19: 19/19 ranked (used: opencode/deepseek-v4-flash-free, opencode/north-mini-code-free)
+◇  AI ranking complete: <ranked>/<M> ranked using
+│  • opencode/deepseek-v4-flash-free
+│  • opencode/north-mini-code-free
 ```
 
 or, if all AI calls failed:
 
 ```
-◇  AI ranking 19: AI unavailable — using heuristic order
+◇  AI ranking unavailable — using heuristic order
 ```
 
 ### AI analysis is additive, not exclusive
 
-The AI ranking **only** runs for entries where the upstream rule chain could not find a match. Entries with a valid rule-chain match (`rec.ruleChainMatched === true`) are printed as skipped and keep their deterministic assignment. The AI ranking thus fills gaps in the rule chain rather than replacing it, ensuring deterministic behavior for well-covered entries and AI-driven selection for uncovered ones.
+The AI ranking **only** runs for entries where the upstream rule chain could not find a match and there is more than one fallback candidate to rank. Entries with a valid rule-chain match (`rec.ruleChainMatched === true`) keep their deterministic assignment. The AI ranking thus fills gaps in the rule chain rather than replacing it, ensuring deterministic behavior for well-covered entries and AI-driven selection for uncovered ones.
 
 ---
 
 ## 🔧 Validating Configuration: `omo-validate-config`
 
-`omo-validate-config` is a companion subcommand that validates an existing `oh-my-openagent.jsonc` file against upstream OpenCode configuration schema requirements.
+`omo-validate-config` is a companion subcommand that validates the local `oh-my-openagent.jsonc` subset written by OMO tooling.
 
 ```bash
 npx omo-validate-config
 # or pointing to a specific file:
 npx omo-validate-config --config /path/to/oh-my-openagent.jsonc
+# or validating the global config:
+npx omo-validate-config --global
 ```
+
+### Validator Flags
+
+| Flag | Description |
+|------|-------------|
+| `--config <path>` | Validate a specific JSONC config file. |
+| `--global` | Validate `~/.config/opencode/oh-my-openagent.jsonc` instead of the nearest project config. |
+| `--fix` | Apply safe mechanical fixes after creating `<path>.bak`. |
+| `-h`, `--help` | Show validator usage help and exit. |
 
 ### What it checks
 
 - **Provider/model reference syntax** — every `provider/model` string is parsed and validated.
-- **Schema compliance** — the config is validated against the oh-my-openagent JSON schema.
-- **Required fields** — agents and categories must have valid `model` and optional `fallback_models` arrays.
+- **Supported schema subset** — the config is checked against the model placement fields this tool writes and validates.
+- **Model placement fields** — agents and categories may define a valid `model` and optional `fallback_models` value. `fallback_models` may be a single string or an array of strings/placement objects; placement objects support `model`, `variant`, `reasoningEffort`, `temperature`, `top_p`, `maxTokens`, and `thinking`.
 - **File readability** — the config file must be valid JSONC.
 
 ### When to use
@@ -364,6 +388,7 @@ npx omo-validate-config --config /path/to/oh-my-openagent.jsonc
 |------|---------|
 | `0` | Config is valid |
 | `1` | Config failed validation (details printed to stderr) |
+| `2` | Argument or usage error before validation |
 
 ### Validation rollback
 
