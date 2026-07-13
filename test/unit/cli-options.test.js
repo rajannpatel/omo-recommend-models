@@ -70,6 +70,11 @@ test("usage output includes --global flag", () => {
   assert.match(usage(), /--global/);
 });
 
+test("usage output documents cost-based free config filtering", () => {
+  assert.match(usage(), /--free-config\s+Include zero-cost models/);
+  assert.match(usage(), /--no-free-config\s+Exclude zero-cost models/);
+});
+
 test("parseCliOptions throws for unknown options without exiting", () => {
   assert.throws(
     () => parseCliOptions(["--unknown-option"]),

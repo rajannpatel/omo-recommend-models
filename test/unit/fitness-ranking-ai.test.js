@@ -7,6 +7,14 @@ import { EventEmitter } from "node:events";
 const opencodePrompts = [];
 const spawnCalls = [];
 
+const evaluatorLookup = {
+  byId: {
+    opencode: new Map([
+      ["zero-alpha", { pricing: { input: 0, output: 0 }, capabilities: { toolcall: true } }],
+    ]),
+  },
+};
+
 function mockSpawnResponse(stdoutText, onPrompt = null) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -34,7 +42,7 @@ mock.module("node:child_process", {
           text: JSON.stringify({
             oracle: [
               "anthropic/claude-opus-5",
-              "opencode/big-pickle",
+              "opencode/model-alpha",
               "google/gemini-2.5-pro",
             ],
             atlas: [
@@ -68,7 +76,7 @@ test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-ch
     ruleChainMatched: true,
     fallback_models: [
       { provider: "openai", model: "gpt-5.5" },
-      { provider: "opencode", model: "big-pickle" },
+      { provider: "opencode", model: "model-alpha" },
     ],
   };
 
@@ -79,7 +87,7 @@ test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-ch
     ruleChainMatched: false,
     fallback_models: [
       { provider: "anthropic", model: "claude-opus-5" },
-      { provider: "opencode", model: "big-pickle" },
+      { provider: "opencode", model: "model-alpha" },
       { provider: "google", model: "gemini-2.5-pro" },
     ],
   };
@@ -89,7 +97,7 @@ test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-ch
   const result = await rankFallbacksByFitness([
     ruleChainEntry,
     nonRuleChainEntry,
-  ]);
+  ], evaluatorLookup);
 
   // Rule-chain entries must never be sent to AI or mutated
   assert.deepEqual(
@@ -143,8 +151,8 @@ test("rankFallbacksByFitness gracefully handles mixed rule-chain and non-rule-ch
   );
   assert.equal(
     nonRuleChainEntry.fallback_models[0].model,
-    "big-pickle",
-    "first fallback model should be big-pickle (second in mock ranking)",
+    "model-alpha",
+    "first fallback model should be model-alpha (second in mock ranking)",
   );
   // The original primary (openai/gpt-5.5) was not in the ranking output,
   // so it gets sorted to Infinity and becomes the last fallback
@@ -189,7 +197,7 @@ test("rankFallbacksByFitness sends one AI prompt per non-rule-chain entry", asyn
     ],
   };
 
-  const result = await rankFallbacksByFitness([atlas, smith]);
+  const result = await rankFallbacksByFitness([atlas, smith], evaluatorLookup);
 
   assert.equal(result, true);
   assert.equal(opencodePrompts.length, 2, "each entry should get its own AI query");

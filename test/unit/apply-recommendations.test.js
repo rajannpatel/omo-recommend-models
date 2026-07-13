@@ -16,6 +16,17 @@ function captureStdout(fn) {
   }
 }
 
+const freeRefs = new Set([
+  "opencode/zero-primary",
+  "opencode/zero-fallback",
+  "github-copilot/zero-primary",
+  "github-copilot/zero-fallback",
+]);
+
+function isFreeRef(ref) {
+  return freeRefs.has(`${ref.provider}/${ref.model}`);
+}
+
 test("applyCloudAssignments filters unconfirmed local and excluded free refs without writing routing", () => {
   const config = {
     agents: {
@@ -32,17 +43,18 @@ test("applyCloudAssignments filters unconfirmed local and excluded free refs wit
     config,
     confirmedModels: new Set(["tinyllama:1.1b"]),
     excludeFreeFromConfig: true,
+    isFreeRef,
     recommendations: [
       {
         name: "sisyphus",
-        model: { provider: "opencode", model: "free-primary" },
+        model: { provider: "opencode", model: "zero-primary" },
         routing: [
           { provider: "local", model: "tinyllama:1.1b" },
           { provider: "local", model: "missing:1b" },
           { provider: "paid", model: "route" },
         ],
         fallback_models: [
-          { provider: "opencode", model: "free-fallback" },
+          { provider: "opencode", model: "zero-fallback" },
           { provider: "paid", model: "fallback" },
         ],
       },
@@ -166,10 +178,10 @@ test("showCloudRecommendations previews the same cloud assignment apply writes",
     {
       name: "sisyphus",
       type: "agent",
-      model: { provider: "opencode", model: "free-primary" },
+      model: { provider: "opencode", model: "zero-primary" },
       routing: [{ provider: "blocked", model: "route" }],
       fallback_models: [
-        { provider: "opencode", model: "free-fallback" },
+        { provider: "opencode", model: "zero-fallback" },
         { provider: "blocked", model: "blocked-fallback" },
         { provider: "paid", model: "fallback", variant: "fast" },
       ],
@@ -191,6 +203,7 @@ test("showCloudRecommendations previews the same cloud assignment apply writes",
       config: previewConfig,
       confirmedModels: new Set(),
       excludeFreeFromConfig: true,
+      isFreeRef,
       isProviderAllowed,
     }),
   );
@@ -199,6 +212,7 @@ test("showCloudRecommendations previews the same cloud assignment apply writes",
     config: applyConfig,
     confirmedModels: new Set(),
     excludeFreeFromConfig: true,
+    isFreeRef,
     isProviderAllowed,
   });
 
@@ -217,10 +231,11 @@ test("applicableCloudAssignment reports display state separately from applyable 
   const assignment = applicableCloudAssignment({
     confirmedModels: new Set(),
     excludeFreeFromConfig: true,
+    isFreeRef,
     rec: {
       name: "sisyphus",
-      model: { provider: "opencode", model: "free-primary" },
-      fallback_models: [{ provider: "opencode", model: "free-fallback" }],
+      model: { provider: "opencode", model: "zero-primary" },
+      fallback_models: [{ provider: "opencode", model: "zero-fallback" }],
     },
     section: {
       model: "previous/model",
@@ -255,12 +270,13 @@ test("applyCloudAssignments leaves stale routing untouched when no finalized cha
     config,
     confirmedModels: new Set(),
     excludeFreeFromConfig: true,
+    isFreeRef,
     recommendations: [
       {
         name: "sisyphus",
-        model: { provider: "opencode", model: "free-primary" },
+        model: { provider: "opencode", model: "zero-primary" },
         routing: [{ provider: "paid", model: "route" }],
-        fallback_models: [{ provider: "opencode", model: "free-fallback" }],
+        fallback_models: [{ provider: "opencode", model: "zero-fallback" }],
       },
     ],
   });
@@ -271,4 +287,60 @@ test("applyCloudAssignments leaves stale routing untouched when no finalized cha
     routing: ["stale/route"],
     fallback_models: ["stale/fallback"],
   });
+});
+
+test("applyCloudAssignments excludes zero-cost refs from any provider", () => {
+  const config = {
+    agents: { sisyphus: { model: "old/provider" } },
+    categories: {},
+  };
+
+  const total = applyCloudAssignments({
+    config,
+    confirmedModels: new Set(),
+    excludeFreeFromConfig: true,
+    isFreeRef,
+    recommendations: [
+      {
+        name: "sisyphus",
+        model: { provider: "github-copilot", model: "zero-primary" },
+        fallback_models: [
+          { provider: "github-copilot", model: "zero-fallback" },
+          { provider: "paid", model: "fallback" },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(total, 1);
+  assert.equal(config.agents.sisyphus.model, "old/provider");
+  assert.deepEqual(config.agents.sisyphus.fallback_models, ["paid/fallback"]);
+});
+
+test("applyCloudAssignments keeps non-free opencode refs", () => {
+  const config = {
+    agents: { sisyphus: { model: "old/provider" } },
+    categories: {},
+  };
+
+  const total = applyCloudAssignments({
+    config,
+    confirmedModels: new Set(),
+    excludeFreeFromConfig: true,
+    isFreeRef,
+    recommendations: [
+      {
+        name: "sisyphus",
+        model: { provider: "opencode", model: "paid-primary" },
+        fallback_models: [
+          { provider: "opencode", model: "paid-fallback" },
+          { provider: "opencode", model: "zero-fallback" },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(total, 1);
+  assert.equal(config.agents.sisyphus.model, "opencode/paid-primary");
+  assert.deepEqual(config.agents.sisyphus.fallback_models, ["opencode/paid-fallback"]);
 });

@@ -51,7 +51,7 @@ test("callOpencode keeps normal-mode event diagnostics out of the presentation s
   );
 
   const { output, value } = await captureStdout(() =>
-    callOpencode("rank this", "opencode/mimo-v2.5-free"),
+    callOpencode("rank this", "opencode/zero-alpha"),
   );
 
   assert.equal(value, "ranked");
@@ -64,7 +64,7 @@ test("callOpencode exposes the command and complete streams in verbose mode", as
   );
 
   const { output, value } = await captureStdout(() =>
-    callOpencode("rank this", "opencode/mimo-v2.5-free", null, { verbose: true }),
+    callOpencode("rank this", "opencode/zero-alpha", null, { verbose: true }),
   );
 
   assert.equal(value, "ranked");

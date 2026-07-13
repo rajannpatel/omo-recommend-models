@@ -34,14 +34,14 @@ test("allConfigEntries returns empty for empty config", () => {
 
 test("uniqueByModelRef deduplicates by provider/model", () => {
   const recs = [
-    { provider: "opencode", model: "big-pickle", reason: "a" },
-    { provider: "opencode", model: "big-pickle", reason: "b" },
+    { provider: "opencode", model: "model-alpha", reason: "a" },
+    { provider: "opencode", model: "model-alpha", reason: "b" },
     { provider: "anthropic", model: "claude-4", reason: "c" },
   ];
   const result = uniqueByModelRef(recs);
   assert.equal(result.length, 2);
   assert.equal(result[0].provider, "opencode");
-  assert.equal(result[0].model, "big-pickle");
+  assert.equal(result[0].model, "model-alpha");
   assert.equal(result[1].provider, "anthropic");
   assert.equal(result[1].model, "claude-4");
 });
@@ -50,43 +50,41 @@ test("uniqueByModelRef filters out invalid recs", () => {
   const recs = [
     null,
     { provider: "", model: "" },
-    { provider: "opencode", model: "big-pickle" },
+    { provider: "opencode", model: "model-alpha" },
   ];
   const result = uniqueByModelRef(recs);
   assert.equal(result.length, 1);
 });
 
 test("finalizeFallbackModels removes duplicates and primary model", () => {
-  const primary = { provider: "opencode", model: "big-pickle" };
+  const primary = { provider: "opencode", model: "model-alpha" };
   const fallbacks = [
-    { provider: "opencode", model: "big-pickle" },
+    { provider: "opencode", model: "model-alpha" },
     { provider: "anthropic", model: "claude-4" },
     { provider: "anthropic", model: "claude-4" },
-    { provider: "opencode", model: "north-mini-code-free" },
+    { provider: "opencode", model: "zero-beta" },
   ];
   const result = finalizeFallbackModels(primary, fallbacks);
   assert.equal(result.length, 2);
   assert.equal(result[0].provider, "anthropic");
   assert.equal(result[0].model, "claude-4");
   assert.equal(result[1].provider, "opencode");
-  assert.equal(result[1].model, "north-mini-code-free");
+  assert.equal(result[1].model, "zero-beta");
 });
 
 test("finalizeFallbackModels handles null primary", () => {
   const fallbacks = [
-    { provider: "opencode", model: "big-pickle" },
+    { provider: "opencode", model: "model-alpha" },
   ];
   const result = finalizeFallbackModels(null, fallbacks);
   assert.equal(result.length, 1);
-  assert.equal(result[0].model, "big-pickle");
+  assert.equal(result[0].model, "model-alpha");
 });
 
 test("finalizeFallbackModels handles null fallbacks", () => {
   const result = finalizeFallbackModels(
-    { provider: "opencode", model: "big-pickle" },
+    { provider: "opencode", model: "model-alpha" },
     null,
   );
   assert.deepEqual(result, []);
 });
-
-

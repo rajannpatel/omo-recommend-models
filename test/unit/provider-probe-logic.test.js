@@ -19,7 +19,7 @@ function childWithEvents(events, options = {}) {
 
 mock.module("node:child_process", {
   namedExports: {
-    execFileSync: mock.fn(() => "opencode/mimo-v2.5-free\n"),
+    execFileSync: mock.fn(() => "opencode/zero-alpha\n"),
     spawn: mock.fn((_bin, args) => {
       if (args?.[0] === "--version") return childWithEvents([]);
       if (args?.some((arg) => String(arg).endsWith("/bad-release"))) {
@@ -38,7 +38,7 @@ mock.module("node:child_process", {
       }
       return childWithEvents([
         { type: "step_start", part: { id: "step" } },
-        { type: "text", part: { text: JSON.stringify({ oracle: ["opencode/big-pickle"] }) } },
+        { type: "text", part: { text: JSON.stringify({ oracle: ["opencode/model-alpha"] }) } },
         { type: "step_finish", part: { id: "step", reason: "stop" } },
       ]);
     }),

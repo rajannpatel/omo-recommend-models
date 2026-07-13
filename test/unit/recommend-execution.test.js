@@ -19,7 +19,7 @@ test("selectRecommendation keeps unprobed paid rule-chain refs eligible when pro
     allLocalModels: [],
     cloudLookup: lookup({
       openai: ["gpt-5.5", "gpt-4.1"],
-      opencode: ["big-pickle"],
+      opencode: ["model-alpha"],
     }),
     cloudOnlyFlag: true,
     config: {

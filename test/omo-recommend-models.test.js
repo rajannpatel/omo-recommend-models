@@ -14,11 +14,11 @@ if (args.includes("--version")) {
 }
 if (args[0] === "models") {
   if (args.includes("--verbose")) {
-    console.log("openai/gpt-5.5\\n{\\n  \\\"capabilities\\\": { \\\"toolcall\\\": true }\\n}\\nopencode/mimo-v2.5-free\\n{\\n  \\\"capabilities\\\": { \\\"toolcall\\\": true }\\n}");
+    console.log("openai/gpt-5.5\\n{\\n  \\\"capabilities\\\": { \\\"toolcall\\\": true }\\n}\\nopencode/zero-alpha\\n{\\n  \\\"capabilities\\\": { \\\"toolcall\\\": true }\\n}");
     process.exit(0);
   }
   console.log("openai/gpt-5.5");
-  console.log("opencode/mimo-v2.5-free");
+  console.log("opencode/zero-alpha");
   process.exit(0);
 }
 if (args[0] === "run") {
@@ -62,7 +62,7 @@ test("dry-run cloud-only CLI keeps operational records inside output groups", (t
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /◇  Verifying availability for 2 cloud provider\(s\)/);
-  assert.match(result.stdout, /\n│\n✓  verified  1\/2 opencode by opencode\/mimo-v2\.5-free\n/);
+  assert.match(result.stdout, /\n│\n✓  verified  1\/2 opencode by opencode\/zero-alpha\n/);
   assert.match(result.stdout, /✓  verified  2\/2 openai by openai\/gpt-5\.5\n/);
   assert.match(result.stdout, /◇  Cloud provider verification complete: 2\/2/);
   assert.match(result.stdout, /✓  Checking GPU: skipped by --cloud-only/);

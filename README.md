@@ -33,11 +33,11 @@ Output (abridged — actual output varies by hardware and provider availability)
 ◇  Loaded: <N> providers (live from `opencode models`) (2s)
 ◇  Cloud provider verification complete: <N>/<N>
 ◇  AI ranking <M> agent(s)/category(ies) by model fitness — processed 0/<M>
-│  → librarian by opencode/big-pickle...
-│  ✓  processed  librarian by opencode/big-pickle
+│  → librarian by <zero-cost-provider>/<zero-cost-model>...
+│  ✓  processed  librarian by <zero-cost-provider>/<zero-cost-model>
 │
 ◇  AI ranking complete: <ranked>/<M> ranked using
-│  • opencode/big-pickle
+│  • <zero-cost-provider>/<zero-cost-model>
 
 ◇  AI Analysis of available providers/models against recommended oh-my-openagent model rule-chains in:
 │  • https://github.com/code-yeongyu/oh-my-openagent/blob/dev/packages/model-core/src/agent-model-requirements.ts
@@ -47,17 +47,17 @@ Output (abridged — actual output varies by hardware and provider availability)
 │
 ◇  Recommended provider/model configurations for /project/.opencode/oh-my-openagent.jsonc:
 │  • agents.sisyphus
-│    ◦ model: opencode/big-pickle
+│    ◦ model: <provider>/<model>
 │    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/mimo-v2.5-free
+│      1. <zero-cost-provider>/<zero-cost-model-a>
+│      2. <zero-cost-provider>/<zero-cost-model-b>
+│      3. <paid-provider>/<paid-model>
 │  • agents.oracle
-│    ◦ model: opencode/mimo-v2.5-free
+│    ◦ model: <zero-cost-provider>/<zero-cost-model-a>
 │    ◦ fallback_models:
-│      1. opencode/deepseek-v4-flash-free
-│      2. opencode/north-mini-code-free
-│      3. opencode/big-pickle
+│      1. <zero-cost-provider>/<zero-cost-model-b>
+│      2. <paid-provider>/<paid-model>
+│      3. <local-provider>/<local-model>
 │  • ...(remaining agents and categories follow the same pattern)
 │
 ◇  Choosing to apply will:
@@ -88,8 +88,8 @@ Output (abridged — actual output varies by hardware and provider availability)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--free-config` | `false` | Compatibility flag. Free models are already included in the JSONC configuration unless `--no-free-config` is passed. |
-| `--no-free-config` | `false` | Negation of `--free-config`. Exclude `opencode/*` free models from JSONC configuration output. |
+| `--free-config` | `false` | Compatibility flag. Zero-cost models are already included in the JSONC configuration unless `--no-free-config` is passed. |
+| `--no-free-config` | `false` | Negation of `--free-config`. Exclude models whose `opencode models --verbose` metadata reports zero input and output `cost`, regardless of provider. |
 
 ### Behavior Flags
 
@@ -99,8 +99,8 @@ Output (abridged — actual output varies by hardware and provider availability)
 | `--global` | `false` | Write configuration to `~/.config/opencode/oh-my-openagent.jsonc` instead of the local `.opencode/oh-my-openagent.jsonc` in the project directory. |
 | `--dry-run` | `false` | Preview all recommendations without writing any changes to the JSONC config file. Default behavior in non-TTY environments unless `--yes` is passed. |
 | `--interactive` | `false` | Force interactive prompts even in non-TTY environments (e.g., CI pipelines with user input). |
-| `--agy-analysis` | `false` | Skip the `opencode models` free AI models and instead use AGY in the CLI terminal to rank eligible non-rule-chain fallback sets. |
-| `--codex-analysis` | `false` | Skip the `opencode models` free AI models and instead use Codex in the CLI terminal to rank eligible non-rule-chain fallback sets. |
+| `--agy-analysis` | `false` | Skip zero-cost OpenCode evaluator models and instead use AGY in the CLI terminal to rank eligible non-rule-chain fallback sets. |
+| `--codex-analysis` | `false` | Skip zero-cost OpenCode evaluator models and instead use Codex in the CLI terminal to rank eligible non-rule-chain fallback sets. |
 | `--debug` | `false` | Print full stack traces for errors to aid debugging. |
 | `--verbose` | `false` | Show executed commands and complete subprocess output. |
 
@@ -133,8 +133,8 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 ── Model Considerations & Exclusions ──
   • Local / Ollama models excluded via --exclude-local
   • Cloud / paid models considered
-  • OpenCode free models excluded via --no-free-config
-  • Free models considered for JSONC configuration
+  • Zero-cost models excluded via --no-free-config
+  • Zero-cost models considered for JSONC configuration
 ```
 
 ---
@@ -144,7 +144,7 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 * **Computed local fit recommendations** 
 
     Detects your GPU and Ollama catalog, estimates each local model's weight plus KV-cache cost, and recommends only models that fit the active role and the available VRAM budget. Local recommendations are computed from metadata and hardware facts, not a hand-curated static table.
-* **Automatic retry and fallback to free and local models** 
+* **Automatic retry and fallback to zero-cost and local models**
 
     Provides a sensible fallback to the most preferred cloud and local AI models for each oh-my-openagent agent and category. These fallbacks are identified from rules published in the oh-my-openagent project, and from an AI assessment.
 * **Initial template generation** 
@@ -238,12 +238,12 @@ When the deterministic upstream rule chain cannot find matching models for an en
 
 ### Which models do the ranking
 
-The ranking is performed by **free OpenCode models** — models tagged as free-tier in the OpenCode model catalog (e.g., `opencode/mimo-v2.5-free`, `opencode/deepseek-v4-flash-free`, `opencode/north-mini-code-free`, `opencode/big-pickle`). The tool first discovers zero-cost, tool-call-capable models from local/project model catalogs, then falls back to `opencode models opencode` when needed. If no free models are available, the tool falls back to `opencode/mimo-v2.5-free`.
+The ranking is performed by **zero-cost evaluator models** — models whose cached OpenCode catalog metadata reports `cost.input === 0` and `cost.output === 0` and supports tool calls. The evaluator selector reads local/project model catalog files, then falls back to `opencode models opencode` when needed. If no zero-cost models are available, AI ranking is skipped and the heuristic recommendation order is preserved.
 
-These free models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
+These zero-cost models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
 
 > [!NOTE]
-> If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the free OpenCode evaluator models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to rank eligible entries: non-rule-chain recommendations with more than one fallback candidate.
+> If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the zero-cost evaluator models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to rank eligible entries: non-rule-chain recommendations with more than one fallback candidate.
 
 ### Evaluator Models vs. Target Models (Account Separation)
 
@@ -256,31 +256,31 @@ Because the `oh-my-openagent` runtime routes its API calls entirely through Open
 
 ---
 
-### Why Free Models Can Outrank or Exclude Paid Models
+### Why Zero-Cost Models Can Outrank or Exclude Paid Models
 
-During recommendation finalization, you may observe free OpenCode models outranking or excluding paid models (like Google or xAI) in the generated `model` and `fallback_models` fields. This happens due to the following design constraints:
+During recommendation finalization, you may observe zero-cost models outranking or excluding paid models (like Google or xAI) in the generated `model` and `fallback_models` fields. This happens due to the following design constraints:
 
 #### 1. Deterministic Upstream Rule Chain
 The plugin prioritizes a deterministic matching chain defined in [model-requirements.js](lib/recommend/model-requirements.js).
 * If an agent/category matches a rule in this upstream chain (indicated by `ruleChainMatched === true`), its primary model selection is kept fixed to match that rule chain deterministically.
 * For these rule-chain matched entries, **AI ranking is skipped** to preserve stability for well-defined roles.
-* For roles like `sisyphus` (Primary orchestrator), the upstream rule chain does **not** include the `google` provider or any `gemini` models. Since the higher-tier models/providers were unavailable, `opencode/big-pickle` was deterministically assigned as the primary model.
+* For roles like `sisyphus` (Primary orchestrator), the upstream rule chain may omit a provider family such as `google`, so deterministic assignment follows the next available rule-chain candidate instead of choosing an unrelated higher-tier model.
 
-#### 2. Free Fallback Supplementation
-To protect against paid API quota exhaustion or rate limits, the tool supplements fallback chains with available free `opencode` models when allowed candidates exist.
-* Rule-chain recommendations can append free fallback models through `withMinimumFreeFallbacks` after preserving existing rule-chain and provider fallbacks.
-* Finalization also appends every allowed zero-cost, tool-call-capable cloud model after missing-provider fallback filling, so unmatched entries receive the same free fallback coverage.
-* Available paid provider models (such as `xai/grok-4.20-0309-reasoning` or `google` models) can appear before free models when they are selected by the rule chain or missing-provider fallback logic.
+#### 2. Zero-Cost Fallback Supplementation
+To protect against paid API quota exhaustion or rate limits, the tool supplements fallback chains with available zero-cost models when allowed candidates exist.
+* Rule-chain recommendations can append zero-cost fallback models through `withMinimumFreeFallbacks` after preserving existing rule-chain and provider fallbacks.
+* Finalization also appends every allowed zero-cost, tool-call-capable cloud model after missing-provider fallback filling, so unmatched entries receive the same zero-cost fallback coverage.
+* Available paid provider models (such as `xai/grok-4.20-0309-reasoning` or `google` models) can appear before zero-cost models when they are selected by the rule chain or missing-provider fallback logic.
 
 #### 3. Per-Provider Paid Model Limits
 For agents/categories where a Google model (like `google/gemini-3.1-pro-preview`) is the primary model:
 * The finalizer enforces a strict constraint of **at most one non-free model per provider** across the entire recommendation (model + fallbacks combined). This prevents multiple paid slots from being occupied by the same provider.
-* Because the primary model occupies the paid slot for `google`, any other Google model (like `google/gemma-4-31b-it`) is filtered out of `fallback_models`. Free `opencode` models are exempt from this limit, which is why they remain.
+* Because the primary model occupies the paid slot for `google`, any other Google model (like `google/gemma-4-31b-it`) is filtered out of `fallback_models`. Zero-cost models from any provider are exempt from this limit, which is why they remain.
 
 #### 4. AI-Ranked Entries Respect Provider Constraints
 For entries that do not match the rule chain (like `hephaestus` or `sysadmin`), AI ranking is performed:
 * If the agent has strict provider requirements (e.g. `hephaestus` requires providers from `["openai", "github-copilot", "opencode", "vercel"]`), the AI respects this constraint and ranks `google` or `xai` models at the bottom, even if they are higher-quality models generally.
-* For the remaining matching providers, free models with larger context windows (like `opencode/nemotron-3-ultra-free` with `1000K` context) are naturally preferred by the AI for task-heavy roles.
+* For the remaining matching providers, zero-cost models with larger context windows are naturally preferred by the AI for task-heavy roles.
 
 ---
 
@@ -301,7 +301,7 @@ When the AI returns a valid JSON ranking for an entry:
 1. Each `provider/model` string in the ranking is fuzzy-matched against the entry's actual model pool using `matchModelRef()`, which tries exact match → case-insensitive match → provider-stripped name match.
 2. The matched models are reordered by AI rank position. Models the AI did not rank (unranked or unrecognized refs) are pushed to the end, sorted last.
 3. The first ranked model becomes the entry's new `model`; the rest become `fallback_models` in AI order.
-4. The entry is tagged with `rec.aiUsedModel` recording which free OpenCode model produced the ranking.
+4. The entry is tagged with `rec.aiUsedModel` recording which zero-cost evaluator model produced the ranking.
 
 Any model ref the AI outputs that cannot be matched to the actual available pool (e.g., hallucinated provider names) is silently dropped. If the AI returns no valid ranking at all, the entry keeps its heuristic order from `recommendation-finalizer.js`.
 
@@ -309,7 +309,7 @@ Any model ref the AI outputs that cannot be matched to the actual available pool
 
 Entries that need AI ranking are processed **sequentially**, with one important optimization to rotate evenly across available evaluator models:
 
-- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads ranking requests uniformly across available free models rather than hammering the first model with all requests.
+- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads ranking requests uniformly across available zero-cost evaluator models rather than hammering the first model with all requests.
 - **No per-entry model retry loop**: each entry receives the next available evaluator model. If that model fails or returns an invalid ranking, it is blacklisted for the rest of the run; affected recommendations keep their heuristic order after the blacklisted model is removed from primary, fallback, and routing candidates, promoting the next fallback when needed.
 - **Concurrency ceiling**: provider probes run sequentially, and AI ranking also invokes at most one evaluator subprocess at a time.
 - **Fail-open**: if all evaluator models fail, recommendations keep the finalization pipeline's heuristic ordering after blacklisted evaluator refs are filtered out. The CLI prints a summary of how many entries were ranked and which models were used.
@@ -325,15 +325,15 @@ During execution, the CLI prints a live progress line:
 Each failed model call appends a diagnostic line to the grouped CLI output:
 
 ```
-│  ✗ librarian by opencode/mimo-v2.5-free — opencode exited with code 1
+│  ✗ librarian by <zero-cost-provider>/<zero-cost-model> — opencode exited with code 1
 ```
 
 On completion, a summary line shows reachable models and ranking coverage:
 
 ```
 ◇  AI ranking complete: <ranked>/<M> ranked using
-│  • opencode/deepseek-v4-flash-free
-│  • opencode/north-mini-code-free
+│  • <zero-cost-provider>/<zero-cost-model-a>
+│  • <zero-cost-provider>/<zero-cost-model-b>
 ```
 
 or, if all AI calls failed:

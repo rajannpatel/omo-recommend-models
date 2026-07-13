@@ -17,10 +17,17 @@ test("rankFallbacksByFitness processes all-ruleChainMatched entries when opencod
     ruleChainMatched: true,
     fallback_models: [
       { provider: "openai", model: "gpt-5.5" },
-      { provider: "opencode", model: "big-pickle" },
+      { provider: "opencode", model: "model-alpha" },
     ],
   };
-  const result = await rankFallbacksByFitness([ruleChainEntry]);
+  const cloudLookup = {
+    byId: {
+      opencode: new Map([
+        ["zero-alpha", { pricing: { input: 0, output: 0 }, capabilities: { toolcall: true } }],
+      ]),
+    },
+  };
+  const result = await rankFallbacksByFitness([ruleChainEntry], cloudLookup);
   // When opencode binary is available, ranking succeeds. When not available, returns false.
   // Either is acceptable depending on the test environment.
   assert.ok(typeof result === "boolean");

@@ -16,14 +16,14 @@ test("inferEntryRequirement derives specialty, chain refs, and max context from 
   // Given: a reasoning agent with upstream chain refs and mixed context metadata.
   const metadataByRef = new Map([
     ["openai/gpt-5.5", { context_length: 128000 }],
-    ["opencode/big-pickle", { context_length: 64000 }],
+    ["opencode/model-alpha", { context_length: 64000 }],
   ]);
 
   // When: the future pure engine infers the local requirement for that entry.
   const requirement = inferEntryRequirement({
     entryName: "sisyphus",
     entryType: "agent",
-    chainRefs: ["openai/gpt-5.5", "opencode/big-pickle"],
+    chainRefs: ["openai/gpt-5.5", "opencode/model-alpha"],
     metadataByRef,
   });
 
@@ -33,7 +33,7 @@ test("inferEntryRequirement derives specialty, chain refs, and max context from 
     entryType: "agent",
     specialty: "reasoning",
     minContext: 128000,
-    chainRefs: ["openai/gpt-5.5", "opencode/big-pickle"],
+    chainRefs: ["openai/gpt-5.5", "opencode/model-alpha"],
   });
 });
 
@@ -45,14 +45,14 @@ test("inferEntryRequirement defaults context to 32000 when chain metadata is abs
   const requirement = inferEntryRequirement({
     entryName: "quick",
     entryType: "category",
-    chainRefs: ["opencode/north-mini-code-free"],
+    chainRefs: ["opencode/zero-beta"],
     metadataByRef,
   });
 
   // Then: it uses the Wave 1 default context and the fast specialty mapping.
   assert.equal(requirement.specialty, "fast");
   assert.equal(requirement.minContext, 32000);
-  assert.deepEqual(requirement.chainRefs, ["opencode/north-mini-code-free"]);
+  assert.deepEqual(requirement.chainRefs, ["opencode/zero-beta"]);
 });
 
 test("inferEntryRequirement maps planned agents and categories to local specialties", () => {

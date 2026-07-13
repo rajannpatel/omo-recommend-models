@@ -50,9 +50,8 @@ test("isTrueQuotaExhaustion vs isQuotaError", () => {
 });
 
 test("parseRetryAfterSeconds and rate limit errors for natural language cooldowns", () => {
-  assert.ok(isRateLimitError("opencode/big-pickle has free usage exceeded, and it's on a 45 minute cooldown to retry"));
+  assert.ok(isRateLimitError("opencode/model-alpha has free usage exceeded, and it's on a 45 minute cooldown to retry"));
   assert.equal(parseRetryAfterSeconds("on a 45 minute cooldown to retry"), 45 * 60);
   assert.equal(parseRetryAfterSeconds("retry in 10 seconds"), 10);
   assert.equal(parseRetryAfterSeconds("cooldown of 2 hours"), 2 * 3600);
 });
-

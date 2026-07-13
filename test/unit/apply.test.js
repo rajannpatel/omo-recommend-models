@@ -70,7 +70,7 @@ if (section.routing || section.model_quality || !config.git_master) {
           description: "Primary orchestrator",
           model_quality: "balanced",
           model: "ollama/local-model-a:latest",
-          routing: ["opencode/north-mini-code-free"],
+          routing: ["opencode/zero-beta"],
           fallback_models: ["ollama/local-model-b:latest"],
         },
       },

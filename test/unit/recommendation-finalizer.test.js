@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { completeAiRecommendations } from "../../lib/recommend/recommendation-finalizer.js";
+import { completeAiRecommendations, deduplicatePerProvider } from "../../lib/recommend/recommendation-finalizer.js";
 import { addMissingCloudFallbacks } from "../../lib/recommend/finalizer/cloud-runtime.js";
 
 test("completeAiRecommendations appends context-selected local fallbacks local-last with decisions", () => {
@@ -16,8 +16,8 @@ test("completeAiRecommendations appends context-selected local fallbacks local-l
   const cloudLookup = {
     byId: {
       opencode: new Map([
-        ["primary-free", { context_length: 128000 }],
-        ["fallback-free", { context_length: 128000 }],
+        ["zero-primary", { context_length: 128000, pricing: { input: 0, output: 0 } }],
+        ["zero-fallback", { context_length: 128000, pricing: { input: 0, output: 0 } }],
       ]),
     },
     sets: {},
@@ -41,17 +41,17 @@ test("completeAiRecommendations appends context-selected local fallbacks local-l
         name: "sisyphus",
         type: "agent",
         profile: "reasoning",
-        model: { provider: "opencode", model: "primary-free", reason: "primary" },
+        model: { provider: "opencode", model: "zero-primary", reason: "primary" },
         routing: [{ provider: "local", model: "tinyllama:1.1b", reason: "bad route" }],
-        fallback_models: [{ provider: "opencode", model: "fallback-free", reason: "cloud fallback" }],
+        fallback_models: [{ provider: "opencode", model: "zero-fallback", reason: "cloud fallback" }],
       },
       {
         name: "hephaestus",
         type: "agent",
         profile: "coding",
-        model: { provider: "opencode", model: "primary-free", reason: "primary" },
+        model: { provider: "opencode", model: "zero-primary", reason: "primary" },
         routing: [],
-        fallback_models: [{ provider: "opencode", model: "fallback-free", reason: "cloud fallback" }],
+        fallback_models: [{ provider: "opencode", model: "zero-fallback", reason: "cloud fallback" }],
       },
     ],
     localModels: { decisions: [], placements: [] },
@@ -81,11 +81,11 @@ test("completeAiRecommendations appends context-selected local fallbacks local-l
   assert.deepEqual(byName.get("sisyphus").routing, []);
   assert.deepEqual(
     byName.get("sisyphus").fallback_models.map((rec) => `${rec.provider}/${rec.model}`),
-    ["opencode/fallback-free", "local/deepseek-r1:14b"],
+    ["opencode/zero-fallback", "local/deepseek-r1:14b"],
   );
   assert.deepEqual(
     byName.get("hephaestus").fallback_models.map((rec) => `${rec.provider}/${rec.model}`),
-    ["opencode/fallback-free", "local/qwen2.5-coder:14b"],
+    ["opencode/zero-fallback", "local/qwen2.5-coder:14b"],
   );
   assert.deepEqual(
     completed.localModels.decisions.map((decision) => ({ name: decision.name, action: decision.action })),
@@ -117,8 +117,8 @@ test("completeAiRecommendations replaces panel-supplied locals with one context-
   const cloudLookup = {
     byId: {
       opencode: new Map([
-        ["primary-free", { context_length: 32000 }],
-        ["fallback-free", { context_length: 32000 }],
+        ["zero-primary", { context_length: 32000, pricing: { input: 0, output: 0 } }],
+        ["zero-fallback", { context_length: 32000, pricing: { input: 0, output: 0 } }],
       ]),
     },
     sets: {},
@@ -132,11 +132,11 @@ test("completeAiRecommendations replaces panel-supplied locals with one context-
       {
         name: "sisyphus",
         type: "agent",
-        model: { provider: "opencode", model: "primary-free", reason: "primary" },
+        model: { provider: "opencode", model: "zero-primary", reason: "primary" },
         routing: [],
         fallback_models: [
           { provider: "local", model: "deepseek-r1:8b", reason: "panel local" },
-          { provider: "opencode", model: "fallback-free", reason: "cloud fallback" },
+          { provider: "opencode", model: "zero-fallback", reason: "cloud fallback" },
           { provider: "local", model: "qwen2.5-coder:8b", reason: "second panel local" },
         ],
       },
@@ -168,7 +168,7 @@ test("completeAiRecommendations replaces panel-supplied locals with one context-
   const [rec] = completed.cloudRecommendations;
   assert.deepEqual(
     rec.fallback_models.map((fallback) => `${fallback.provider}/${fallback.model}`),
-    ["opencode/fallback-free", "local/qwen2.5-coder:8b"],
+    ["opencode/zero-fallback", "local/qwen2.5-coder:8b"],
   );
   assert.deepEqual(
     completed.localModels.decisions.map((decision) => ({ name: decision.name, action: decision.action })),
@@ -186,11 +186,11 @@ test("completeAiRecommendations filters blocked models per provider", () => {
   const cloudLookup = {
     byId: {
       opencode: new Map([
-        ["gpt-5.5", { context_length: 200000 }],
-        ["fallback-free", { context_length: 200000 }],
+        ["gpt-5.5", { context_length: 200000, pricing: { input: 0.01, output: 0.02 } }],
+        ["zero-fallback", { context_length: 200000, pricing: { input: 0, output: 0 } }],
       ]),
       "github-copilot": new Map([
-        ["gpt-5.5", { context_length: 200000 }],
+        ["gpt-5.5", { context_length: 200000, pricing: { input: 0.01, output: 0.02 } }],
       ]),
     },
     sets: {},
@@ -228,7 +228,26 @@ test("completeAiRecommendations filters blocked models per provider", () => {
   assert.equal(rec.model.model, "gpt-5.5");
   assert.deepEqual(
     rec.fallback_models.map((fallback) => `${fallback.provider}/${fallback.model}`),
-    ["opencode/fallback-free"],
+    ["opencode/zero-fallback"],
+  );
+});
+
+test("deduplicatePerProvider preserves same-provider zero-cost refs when predicate is cost-aware", () => {
+  const rec = {
+    model: { provider: "openai", model: "gpt-5.5" },
+    fallback_models: [
+      { provider: "github-copilot", model: "zero-a" },
+      { provider: "github-copilot", model: "zero-b" },
+    ],
+  };
+
+  deduplicatePerProvider(rec, {
+    isFreeRef: (ref) => ref.provider === "github-copilot",
+  });
+
+  assert.deepEqual(
+    rec.fallback_models.map((ref) => `${ref.provider}/${ref.model}`),
+    ["github-copilot/zero-a", "github-copilot/zero-b"],
   );
 });
 
@@ -242,7 +261,7 @@ test("completeAiRecommendations preserves ruleChainMatched flag through finaliza
   const cloudLookup = {
     byId: {
       opencode: new Map([
-        ["primary-free", { context_length: 128000 }],
+        ["zero-primary", { context_length: 128000, pricing: { input: 0, output: 0 } }],
       ]),
     },
     sets: {},
@@ -254,7 +273,7 @@ test("completeAiRecommendations preserves ruleChainMatched flag through finaliza
         type: "agent",
         profile: "reasoning",
         ruleChainMatched: true,
-        model: { provider: "opencode", model: "primary-free", reason: "primary" },
+        model: { provider: "opencode", model: "zero-primary", reason: "primary" },
         routing: [],
         fallback_models: [],
       },
@@ -279,9 +298,9 @@ test("addMissingCloudFallbacks adds only one best model per provider", () => {
   const cloudLookup = {
     byId: {
       opencode: new Map([
-        ["big-pickle", { capabilities: { toolcall: true }, context_length: 200000 }],
-        ["north-mini-code-free", { capabilities: { toolcall: true }, context_length: 32000 }],
-        ["nemotron-3-ultra-free", { capabilities: { toolcall: true }, context_length: 32000 }],
+        ["model-alpha", { capabilities: { toolcall: true }, context_length: 200000 }],
+        ["zero-beta", { capabilities: { toolcall: true }, context_length: 32000 }],
+        ["zero-gamma", { capabilities: { toolcall: true }, context_length: 32000 }],
       ]),
     },
     sets: {},

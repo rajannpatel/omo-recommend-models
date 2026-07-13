@@ -10,9 +10,16 @@ import { rankFallbacksByFitness } from "../../lib/recommend/fitness-ranking.js";
 function lookup(models) {
   const byId = {};
   for (const [provider, ids] of Object.entries(models)) {
-    byId[provider] = new Map(ids.map((id) => [id, {}]));
+    byId[provider] = new Map(ids.map((id) => [id, modelMeta(provider, id)]));
   }
   return { byId, sets: {} };
+}
+
+function modelMeta(provider, id) {
+  if (provider === "opencode" || id.includes("free")) {
+    return { pricing: { input: 0, output: 0 }, capabilities: { toolcall: true } };
+  }
+  return { pricing: { input: 0.01, output: 0.02 }, capabilities: { toolcall: true } };
 }
 
 test("createRuleBasedRecommendations selects the first available upstream-chain model", () => {
@@ -30,7 +37,7 @@ test("createRuleBasedRecommendations selects the first available upstream-chain 
     cloudLookup: lookup({
       "opencode-go": ["kimi-k2.6"],
       openai: ["gpt-5.5"],
-      opencode: ["big-pickle"],
+      opencode: ["glm-5"],
     }),
   });
 
@@ -42,11 +49,11 @@ test("createRuleBasedRecommendations selects the first available upstream-chain 
   assert.equal(sisyphus.model.model, "kimi-k2.6");
   assert.deepEqual(
     sisyphus.routing.map((ref) => `${ref.provider}/${ref.model}`),
-    ["openai/gpt-5.5", "opencode/big-pickle"],
+    ["openai/gpt-5.5", "opencode/glm-5"],
   );
   assert.deepEqual(
     sisyphus.fallback_models.map((ref) => `${ref.provider}/${ref.model}`),
-    ["openai/gpt-5.5", "opencode/big-pickle"],
+    ["openai/gpt-5.5", "opencode/glm-5"],
   );
   assert.equal(sisyphus.fallback_models[0].provider, "openai");
   assert.equal(sisyphus.fallback_models[0].variant, "medium");
@@ -70,7 +77,7 @@ test("createRuleBasedRecommendations keeps multiple free fallbacks from opencode
     cloudLookup: lookup({
       "opencode-go": ["kimi-k2.6"],
       openai: ["gpt-5.5"],
-      opencode: ["big-pickle", "north-mini-code-free"],
+      opencode: ["glm-5", "zero-beta"],
     }),
   });
 
@@ -79,8 +86,8 @@ test("createRuleBasedRecommendations keeps multiple free fallbacks from opencode
     sisyphus.fallback_models.map((ref) => `${ref.provider}/${ref.model}`),
     [
       "openai/gpt-5.5",
-      "opencode/big-pickle",
-      "opencode/north-mini-code-free",
+      "opencode/glm-5",
+      "opencode/zero-beta",
     ],
   );
 });
@@ -98,7 +105,7 @@ test("createRuleBasedRecommendations strips manually excluded providers and mode
     config,
     cloudLookup: lookup({
       openai: ["gpt-5.5"],
-      opencode: ["big-pickle"],
+      opencode: ["gpt-5.5", "glm-5"],
       "opencode-go": ["kimi-k2.6"],
     }),
     excludeModels: ["openai", "opencode-go/kimi-k2.6"],
@@ -107,11 +114,11 @@ test("createRuleBasedRecommendations strips manually excluded providers and mode
   assert.equal(result.cloudRecommendations.length, 2);
   const sisyphus = result.cloudRecommendations.find((rec) => rec.name === "sisyphus");
   assert.equal(sisyphus.model.provider, "opencode");
-  assert.equal(sisyphus.model.model, "big-pickle");
+  assert.equal(sisyphus.model.model, "gpt-5.5");
   const hephaestus = result.cloudRecommendations.find((rec) => rec.name === "hephaestus");
   assert.equal(hephaestus.model.provider, "opencode");
-  assert.equal(hephaestus.model.model, "big-pickle");
-  assert.match(result.analysis, /hephaestus \(tried: \(openai, github-copilot, opencode, vercel\)\/gpt-5.5/);
+  assert.equal(hephaestus.model.model, "gpt-5.5");
+  assert.equal(hephaestus.ruleChainMatched, true);
 });
 
 test("createRuleBasedRecommendations excludes unavailable providers everywhere", () => {
@@ -127,7 +134,7 @@ test("createRuleBasedRecommendations excludes unavailable providers everywhere",
     cloudLookup: lookup({
       "opencode-go": ["kimi-k2.6"],
       openai: ["gpt-5.5"],
-      opencode: ["big-pickle"],
+      opencode: ["glm-5"],
     }),
     isProviderAllowed: (provider) => provider !== "opencode-go",
   });
@@ -153,7 +160,7 @@ test("createRuleBasedRecommendations uses paid and free picks after chain exhaus
     config,
     cloudLookup: lookup({
       paid: ["large-pro"],
-      opencode: ["utility-free"],
+      opencode: ["zero-utility"],
     }),
   });
 
@@ -161,7 +168,7 @@ test("createRuleBasedRecommendations uses paid and free picks after chain exhaus
   assert.equal(hephaestus.model.provider, "paid");
   assert.equal(hephaestus.model.model, "large-pro");
   assert.equal(hephaestus.fallback_models[0].provider, "opencode");
-  assert.equal(hephaestus.fallback_models[0].model, "utility-free");
+  assert.equal(hephaestus.fallback_models[0].model, "zero-utility");
   assert.match(result.analysis, /tried: \(openai, github-copilot, opencode, vercel\)\/gpt-5.5/);
 });
 
@@ -178,7 +185,7 @@ test("createRuleBasedRecommendations adds the best usable fallback from each out
     cloudLookup: lookup({
       "paid-a": ["tiny-mini", "large-pro"],
       "paid-b": ["reasoning-plus", "small-lite"],
-      opencode: ["free-large", "free-mini"],
+      opencode: ["zero-large", "zero-mini"],
     }),
     isModelAllowed: ({ provider, model }) =>
       `${provider}/${model}` !== "paid-b/reasoning-plus",
@@ -188,7 +195,7 @@ test("createRuleBasedRecommendations adds the best usable fallback from each out
   assert.deepEqual(
     [hephaestus.model, ...hephaestus.fallback_models]
       .map((ref) => `${ref.provider}/${ref.model}`),
-    ["paid-a/large-pro", "paid-b/small-lite", "opencode/free-large", "opencode/free-mini"],
+    ["paid-a/large-pro", "paid-b/small-lite", "opencode/zero-large", "opencode/zero-mini"],
   );
   assert.equal(
     hephaestus.model.reason,
@@ -208,7 +215,7 @@ test("createRuleBasedRecommendations skips disallowed outside-chain paid refs", 
     config,
     cloudLookup: lookup({
       openai: ["gpt-5.5-pro", "gpt-4.1"],
-      opencode: ["utility-free"],
+      opencode: ["zero-utility"],
     }),
     isModelAllowed: ({ provider, model }) =>
       `${provider}/${model}` !== "openai/gpt-5.5-pro",
@@ -311,7 +318,7 @@ test("createRuleBasedRecommendations sets ruleChainMatched:true for rule-chain m
     cloudLookup: lookup({
       "opencode-go": ["kimi-k2.6"],
       openai: ["gpt-5.5"],
-      opencode: ["big-pickle"],
+      opencode: ["glm-5"],
     }),
   });
 
@@ -355,7 +362,7 @@ test("end-to-end ruleChainMatched pipeline: createRuleBasedRecommendations → c
   const cloudLookup = lookup({
     "opencode-go": ["kimi-k2.6"],
     openai: ["gpt-5.5"],
-    opencode: ["big-pickle", "north-mini-code-free"],
+    opencode: ["glm-5", "zero-beta"],
   });
 
   // Step 1: Create rule-based recommendations (produces ruleChainMatched: true for sisyphus)
@@ -391,7 +398,7 @@ test("end-to-end ruleChainMatched pipeline: createRuleBasedRecommendations → c
 
   // Step 3: Rank fallbacks by fitness (AI ranking - should skip rule-chain entries)
   // This may call opencode binary if available, but rule-chain entries are guarded
-  await rankFallbacksByFitness(completed.cloudRecommendations);
+  await rankFallbacksByFitness(completed.cloudRecommendations, cloudLookup);
 
   // Verify rule-chain-matched entry: model unchanged, fallbacks reordered by AI, aiUsedModel set
   const finalSisyphus = completed.cloudRecommendations.find((rec) => rec.name === "sisyphus");
