@@ -8,11 +8,8 @@ import {
   estimateKvCacheGb,
   fitsGpu,
   inferEntryRequirement,
-  localVramBudgetGb,
   parseParameterCountB,
   rankLocalCandidates,
-  scoreLocalCandidate,
-  specialtyForEntry,
 } from "../../lib/recommend/local-recommendation-engine.js";
 
 test("inferEntryRequirement derives specialty, chain refs, and max context from metadata", () => {
@@ -58,7 +55,7 @@ test("inferEntryRequirement defaults context to 32000 when chain metadata is abs
   assert.deepEqual(requirement.chainRefs, ["opencode/north-mini-code-free"]);
 });
 
-test("specialtyForEntry maps planned agents and categories to local specialties", () => {
+test("inferEntryRequirement maps planned agents and categories to local specialties", () => {
   // Given: representative OMO entries from every planned specialty bucket.
   const entries = [
     ["sisyphus", "agent", "reasoning"],
@@ -69,8 +66,10 @@ test("specialtyForEntry maps planned agents and categories to local specialties"
     ["writing", "category", "general"],
   ];
 
-  // When: each entry name is mapped to its local-model specialty.
-  const mapped = entries.map(([entryName, entryType]) => specialtyForEntry(entryName, entryType));
+  // When: each entry requirement is inferred through the public engine API.
+  const mapped = entries.map(([entryName, entryType]) =>
+    inferEntryRequirement({ entryName, entryType }).specialty,
+  );
 
   // Then: the specialty map follows the hyperplan buckets exactly.
   assert.deepEqual(
@@ -119,12 +118,10 @@ test("localVramBudgetGb and fitsGpu use only ninety percent of GPU VRAM", () => 
   const gpu = { name: "RTX 4090", vramGb: 24 };
 
   // When: the engine calculates budget and fit for nearby candidates.
-  const budgetGb = localVramBudgetGb(gpu);
   const fitting = fitsGpu({ weightGb: 20, kvCacheGb: 1.5 }, gpu);
   const exactlyAtBudget = fitsGpu({ weightGb: 20, kvCacheGb: 1.6 }, gpu);
 
   // Then: no legacy 1.5GB subtraction is applied and fit remains a strict less-than comparison.
-  assert.equal(budgetGb, 21.6);
   assert.equal(fitting, true);
   assert.equal(exactlyAtBudget, false);
 });
@@ -145,22 +142,42 @@ test("classifyCandidateSpecialty recognizes coding, reasoning, vision, and gener
   assert.deepEqual(specialties, ["coding", "reasoning", "vision", "general"]);
 });
 
-test("scoreLocalCandidate applies parameter, popularity, and role-match scoring", () => {
-  // Given: a fitting local coding model and a coding entry requirement.
-  const candidate = {
-    name: "qwen2.5-coder:32b",
-    parametersB: 32,
-    openRouterPopularityIndex: 7,
-    specialty: "coding",
-    installed: false,
-  };
+test("rankLocalCandidates applies parameter, popularity, and role-match scoring", () => {
+  // Given: a coding requirement with candidates that differ by role match and popularity.
   const requirement = { entryName: "hephaestus", entryType: "agent", specialty: "coding", minContext: 64000 };
+  const gpu = { name: "RTX 4090", vramGb: 24 };
+  const candidates = [
+    {
+      name: "popular-general:32b",
+      ref: "local/popular-general:32b",
+      parametersB: 32,
+      contextLength: 64000,
+      specialty: "general",
+      weightGb: 10,
+      kvCacheGb: 2,
+      openRouterPopularityIndex: 20,
+    },
+    {
+      name: "qwen2.5-coder:32b",
+      ref: "local/qwen2.5-coder:32b",
+      parametersB: 32,
+      contextLength: 64000,
+      specialty: "coding",
+      weightGb: 10,
+      kvCacheGb: 2,
+      openRouterPopularityIndex: 7,
+    },
+  ];
 
-  // When: the pure scorer evaluates the candidate for that entry.
-  const score = scoreLocalCandidate(candidate, requirement);
+  // When: the public ranker evaluates the candidates for that entry.
+  const ranked = rankLocalCandidates({ candidates, requirement, gpu });
 
-  // Then: score = params * 10 + popularity + 50 role-match bonus.
-  assert.equal(score, 377);
+  // Then: the coding role-match bonus outranks the higher-popularity general model.
+  assert.deepEqual(
+    ranked.map((candidate) => candidate.ref),
+    ["local/qwen2.5-coder:32b", "local/popular-general:32b"],
+  );
+  assert.equal(ranked[0].score, 377);
 });
 
 test("rankLocalCandidates hard-filters unsuitable models and uses installed state as tie-breaker", () => {
