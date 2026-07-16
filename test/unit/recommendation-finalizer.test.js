@@ -81,11 +81,11 @@ test("completeAiRecommendations appends context-selected local fallbacks local-l
   assert.deepEqual(byName.get("sisyphus").routing, []);
   assert.deepEqual(
     byName.get("sisyphus").fallback_models.map((rec) => `${rec.provider}/${rec.model}`),
-    ["opencode/zero-fallback", "local/deepseek-r1:14b"],
+    ["local/deepseek-r1:14b"],
   );
   assert.deepEqual(
     byName.get("hephaestus").fallback_models.map((rec) => `${rec.provider}/${rec.model}`),
-    ["opencode/zero-fallback", "local/qwen2.5-coder:14b"],
+    ["local/qwen2.5-coder:14b"],
   );
   assert.deepEqual(
     completed.localModels.decisions.map((decision) => ({ name: decision.name, action: decision.action })),
@@ -168,7 +168,7 @@ test("completeAiRecommendations replaces panel-supplied locals with one context-
   const [rec] = completed.cloudRecommendations;
   assert.deepEqual(
     rec.fallback_models.map((fallback) => `${fallback.provider}/${fallback.model}`),
-    ["opencode/zero-fallback", "local/qwen2.5-coder:8b"],
+    ["local/qwen2.5-coder:8b"],
   );
   assert.deepEqual(
     completed.localModels.decisions.map((decision) => ({ name: decision.name, action: decision.action })),
@@ -232,22 +232,123 @@ test("completeAiRecommendations filters blocked models per provider", () => {
   );
 });
 
-test("deduplicatePerProvider preserves same-provider zero-cost refs when predicate is cost-aware", () => {
+test("deduplicatePerProvider keeps one free and one paid model per provider", () => {
   const rec = {
     model: { provider: "openai", model: "gpt-5.5" },
     fallback_models: [
+      { provider: "openai", model: "gpt-5.5-pro" },
+      { provider: "openai", model: "zero-openai" },
+      { provider: "openai", model: "zero-openai-lite" },
       { provider: "github-copilot", model: "zero-a" },
       { provider: "github-copilot", model: "zero-b" },
     ],
   };
 
   deduplicatePerProvider(rec, {
-    isFreeRef: (ref) => ref.provider === "github-copilot",
+    isFreeRef: (ref) => ref.model.startsWith("zero-"),
   });
 
   assert.deepEqual(
     rec.fallback_models.map((ref) => `${ref.provider}/${ref.model}`),
-    ["github-copilot/zero-a", "github-copilot/zero-b"],
+    ["openai/zero-openai", "github-copilot/zero-a"],
+  );
+});
+
+test("completeAiRecommendations keeps one available free fallback per provider", () => {
+  const config = {
+    agents: {
+      sisyphus: { description: "reasoning lead" },
+    },
+    categories: {},
+  };
+  const cloudLookup = {
+    byId: {
+      openai: new Map([
+        ["gpt-5.5", { context_length: 200000, pricing: { input: 0.01, output: 0.02 } }],
+      ]),
+      openrouter: new Map([
+        ["zero-allowed-a", { capabilities: { toolcall: true }, context_length: 64000, pricing: { input: 0, output: 0 } }],
+        ["zero-policy-blocked", { capabilities: { toolcall: true }, context_length: 128000, pricing: { input: 0, output: 0 } }],
+        ["zero-allowed-b", { capabilities: { toolcall: true }, context_length: 32000, pricing: { input: 0, output: 0 } }],
+      ]),
+    },
+    sets: {},
+  };
+  const aiResult = {
+    cloudRecommendations: [
+      {
+        name: "sisyphus",
+        type: "agent",
+        model: { provider: "openai", model: "gpt-5.5", reason: "primary" },
+        routing: [],
+        fallback_models: [
+          { provider: "openrouter", model: "zero-allowed-a", reason: "first available OpenRouter fallback" },
+          { provider: "openrouter", model: "zero-policy-blocked", reason: "blocked by provider policy" },
+          { provider: "openrouter", model: "zero-allowed-b", reason: "second available OpenRouter fallback" },
+        ],
+      },
+    ],
+    localModels: { decisions: [], placements: [] },
+  };
+  const blockedRefs = new Set(["openrouter/zero-policy-blocked"]);
+
+  const completed = completeAiRecommendations(
+    aiResult,
+    config,
+    cloudLookup,
+    [],
+    { hasGpu: false, vramGb: 0 },
+    { models: [] },
+    () => true,
+    null,
+    ({ provider, model }) => !blockedRefs.has(`${provider}/${model}`),
+  );
+
+  const [rec] = completed.cloudRecommendations;
+  assert.deepEqual(
+    rec.fallback_models.map((fallback) => `${fallback.provider}/${fallback.model}`),
+    ["openrouter/zero-allowed-a"],
+  );
+});
+
+test("completeAiRecommendations selects injected free fallbacks by model fit", () => {
+  const config = {
+    agents: {
+      scout: { description: "general scout" },
+    },
+    categories: {},
+  };
+  const cloudLookup = {
+    byId: {
+      openrouter: new Map([
+        ["zero-mini", { capabilities: { toolcall: true }, context_length: 32000, pricing: { input: 0, output: 0 } }],
+        ["zero-ultra-reasoning", { capabilities: { toolcall: true, reasoning: true }, context_length: 200000, pricing: { input: 0, output: 0 } }],
+      ]),
+      opencode: new Map([
+        ["zero-basic", { capabilities: { toolcall: true }, context_length: 32000, pricing: { input: 0, output: 0 } }],
+      ]),
+    },
+    sets: {},
+  };
+  const aiResult = {
+    cloudRecommendations: [],
+    localModels: { decisions: [], placements: [] },
+  };
+
+  const completed = completeAiRecommendations(
+    aiResult,
+    config,
+    cloudLookup,
+    [],
+    { hasGpu: false, vramGb: 0 },
+    { models: [] },
+  );
+
+  const [rec] = completed.cloudRecommendations;
+  assert.equal(rec.model.model, "zero-ultra-reasoning");
+  assert.deepEqual(
+    rec.fallback_models.map((fallback) => `${fallback.provider}/${fallback.model}`),
+    ["opencode/zero-basic"],
   );
 });
 

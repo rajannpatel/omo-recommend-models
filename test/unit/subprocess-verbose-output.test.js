@@ -15,9 +15,20 @@ function asyncChild() {
   return child;
 }
 
+const execFileSyncMock = mock.fn((_command, args) => {
+  if (args.includes("--normal-fail")) {
+    const error = new Error("raw failure message with child stderr");
+    error.status = 1;
+    error.stdout = "raw child stdout\n";
+    error.stderr = "raw child stderr\n";
+    throw error;
+  }
+  return "sync body\n";
+});
+
 mock.module("node:child_process", {
   namedExports: {
-    execFileSync: mock.fn(() => "sync body\n"),
+    execFileSync: execFileSyncMock,
     spawn: mock.fn(() => asyncChild()),
     spawnSync: mock.fn((_command, args) =>
       args.includes("--fail")
@@ -64,6 +75,50 @@ test("SubprocessRunner reports complete synchronous and asynchronous streams in 
   assert.match(asyncResult.output, /│  \[stdout\] response body/);
   assert.match(asyncResult.output, /│  \[stderr\] curl warning/);
   assert.match(asyncResult.output, /└\n┌\n│\n$/);
+});
+
+test("SubprocessRunner reports command status without streams in normal mode", async () => {
+  const { RuntimeContext } = await import("../../lib/runtime-context.js");
+  const { SubprocessRunner } = await import("../../lib/subprocess.js");
+  const ctx = new RuntimeContext();
+  const runner = new SubprocessRunner(ctx);
+
+  const sync = await captureStdout(() => runner.execSync("curl", ["-s", "https://example.test"]));
+  assert.equal(sync.value, "sync body\n");
+  assert.equal(sync.output, "│  • curl -s https://example.test\n");
+  assert.doesNotMatch(sync.output, /sync body|\[stdout\]|\[stderr\]/);
+
+  const asyncResult = await captureStdout(() =>
+    runner.execAsync("curl", ["-s", "https://example.test"]),
+  );
+  assert.equal(asyncResult.value, "response body\n");
+  assert.equal(asyncResult.output, "│  • curl -s https://example.test\n");
+  assert.doesNotMatch(asyncResult.output, /response body|curl warning|\[stdout\]|\[stderr\]/);
+});
+
+test("execFileSyncWithVerbose pipes inherited stdio and sanitizes normal failures", async () => {
+  const { RuntimeContext } = await import("../../lib/runtime-context.js");
+  const { execFileSyncWithVerbose } = await import("../../lib/subprocess.js");
+  const ctx = new RuntimeContext();
+
+  const success = await captureStdout(() =>
+    execFileSyncWithVerbose(ctx, "ollama", ["pull", "llama3"], { stdio: "inherit" }),
+  );
+  assert.equal(success.value, "sync body\n");
+  assert.equal(success.output, "│  • ollama pull llama3\n");
+
+  const successCall = execFileSyncMock.mock.calls.at(-1).arguments;
+  assert.deepEqual(successCall[2].stdio, ["ignore", "pipe", "pipe"]);
+
+  const failure = await captureStdout(() => {
+    assert.throws(
+      () => execFileSyncWithVerbose(ctx, "ollama", ["--normal-fail"], { stdio: "inherit" }),
+      /Command failed: ollama \(1\)/,
+    );
+  });
+
+  assert.equal(failure.output, "│  • ollama --normal-fail\n");
+  assert.doesNotMatch(failure.output, /raw child stdout|raw child stderr|raw failure message|\[stdout\]|\[stderr\]/);
 });
 
 test("execFileSyncWithVerbose reports failed synchronous streams once", async () => {

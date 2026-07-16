@@ -12,8 +12,7 @@ function lookup(models) {
   return { byId, sets: {} };
 }
 
-test("selectRecommendation keeps unprobed paid rule-chain refs eligible when provider verified", async () => {
-  // Given: OpenAI verified through one paid ref, while another OpenAI ref satisfies the rule chain.
+test("selectRecommendation only keeps probed paid refs eligible", async () => {
   const runtime = { ctx: new RuntimeContext() };
   const inputs = {
     allLocalModels: [],
@@ -49,11 +48,10 @@ test("selectRecommendation keeps unprobed paid rule-chain refs eligible when pro
     runtime,
   });
 
-  // Then: the rule-chain OpenAI ref is selected even though that exact ref was not the probe winner.
   const hephaestus = selection.aiResult.cloudRecommendations.find(
     (rec) => rec.name === "hephaestus",
   );
   assert.equal(hephaestus.model.provider, "openai");
-  assert.equal(hephaestus.model.model, "gpt-5.5");
-  assert.doesNotMatch(selection.aiResult.analysis, /No available rule-chain models/);
+  assert.equal(hephaestus.model.model, "gpt-4.1");
+  assert.match(selection.aiResult.analysis, /No available rule-chain models/);
 });

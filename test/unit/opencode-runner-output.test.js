@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test, { mock } from "node:test";
 
+let nextRunMode = "success";
+
 function childFor(args) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -10,6 +12,15 @@ function childFor(args) {
   process.nextTick(() => {
     if (args.includes("--version")) {
       child.stdout.emit("data", Buffer.from("opencode 1.0.0\n"));
+    } else if (nextRunMode === "nonzero") {
+      nextRunMode = "success";
+      child.stderr.emit("data", Buffer.from("raw opencode failure stderr\n"));
+      child.emit("close", 9);
+      return;
+    } else if (nextRunMode === "no-text") {
+      nextRunMode = "success";
+      child.stdout.emit("data", Buffer.from(`${JSON.stringify({ type: "done" })}\n`));
+      child.stderr.emit("data", Buffer.from("raw opencode no-text stderr\n"));
     } else {
       child.stdout.emit("data", Buffer.from(`${JSON.stringify({
         type: "text",
@@ -45,7 +56,7 @@ async function captureStdout(fn) {
   }
 }
 
-test("callOpencode keeps normal-mode event diagnostics out of the presentation stream", async () => {
+test("callOpencode reports normal status without raw events or stderr", async () => {
   const { callOpencode } = await import(
     "../../lib/recommend/fitness/opencode-runner.js"
   );
@@ -55,7 +66,8 @@ test("callOpencode keeps normal-mode event diagnostics out of the presentation s
   );
 
   assert.equal(value, "ranked");
-  assert.equal(output, "");
+  assert.equal(output, "│  • opencode --version\n│  • opencode run --format json --model opencode/zero-alpha\n");
+  assert.doesNotMatch(output, /ranked|model warning|\[event|\[raw|\[stderr\]|\{"type"/);
 });
 
 test("callOpencode exposes the command and complete streams in verbose mode", async () => {
@@ -72,4 +84,38 @@ test("callOpencode exposes the command and complete streams in verbose mode", as
   assert.match(output, /│  \[stdout\] .*"type":"text"/);
   assert.match(output, /│  \[stderr\] model warning/);
   assert.match(output, /└\n$/);
+});
+
+test("callOpencode hides child stderr from normal nonzero failures", async () => {
+  const { callOpencode } = await import(
+    "../../lib/recommend/fitness/opencode-runner.js"
+  );
+  nextRunMode = "nonzero";
+
+  const { output } = await captureStdout(async () => {
+    await assert.rejects(
+      callOpencode("rank this", "opencode/zero-alpha"),
+      /opencode exited with code 9$/,
+    );
+  });
+
+  assert.equal(output, "│  • opencode run --format json --model opencode/zero-alpha\n");
+  assert.doesNotMatch(output, /raw opencode failure stderr|\[stderr\]/);
+});
+
+test("callOpencode hides child stderr from normal no-text failures", async () => {
+  const { callOpencode } = await import(
+    "../../lib/recommend/fitness/opencode-runner.js"
+  );
+  nextRunMode = "no-text";
+
+  const { output } = await captureStdout(async () => {
+    await assert.rejects(
+      callOpencode("rank this", "opencode/zero-alpha"),
+      /opencode returned no text response \(exit 0 \(events: done\)\)$/,
+    );
+  });
+
+  assert.equal(output, "│  • opencode run --format json --model opencode/zero-alpha\n");
+  assert.doesNotMatch(output, /raw opencode no-text stderr|\[stderr\]/);
 });

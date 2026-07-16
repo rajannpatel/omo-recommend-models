@@ -8,6 +8,7 @@ import {
   VARIANT_BONUS,
   LOCAL_PROVIDER,
   MODEL_CACHE_FILE,
+  POLICY_EXCLUSION_CACHE_FILE,
   KNOWN_MODELS,
 } from "../../lib/constants.js";
 
@@ -27,6 +28,26 @@ test("LOCAL_PROVIDER is 'local'", () => {
 test("MODEL_CACHE_FILE is an absolute path", () => {
   assert.ok(path.isAbsolute(MODEL_CACHE_FILE));
   assert.ok(MODEL_CACHE_FILE.includes("ollama-models.json"));
+});
+
+test("MODEL_CACHE_FILE stays in the established cache namespace", () => {
+  assert.equal(
+    MODEL_CACHE_FILE,
+    path.join(os.homedir(), ".cache", "oh-my-opencode", "ollama-models.json"),
+  );
+});
+
+test("POLICY_EXCLUSION_CACHE_FILE uses its dedicated cache file", () => {
+  assert.equal(
+    POLICY_EXCLUSION_CACHE_FILE,
+    path.join(
+      os.homedir(),
+      ".cache",
+      "oh-my-opencode",
+      "policy-excluded-models.json",
+    ),
+  );
+  assert.notEqual(POLICY_EXCLUSION_CACHE_FILE, MODEL_CACHE_FILE);
 });
 
 test("KNOWN_MODELS is an array of objects with name and tags", () => {

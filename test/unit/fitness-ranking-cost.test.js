@@ -31,7 +31,7 @@ mock.module("node:child_process", {
   },
 });
 
-test("rankFallbacksByFitness uses cloudLookup cost metadata when deduplicating after ranking", async () => {
+test("rankFallbacksByFitness keeps one same-provider zero-cost fallback after ranking", async () => {
   const { rankFallbacksByFitness } = await import(
     "../../lib/recommend/fitness-ranking.js"
   );
@@ -63,6 +63,6 @@ test("rankFallbacksByFitness uses cloudLookup cost metadata when deduplicating a
     atlas.fallback_models
       .filter((ref) => ref.provider === "github-copilot")
       .map((ref) => ref.model),
-    ["zero-a", "zero-b"],
+    ["zero-a"],
   );
 });

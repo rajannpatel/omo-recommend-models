@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createVerboseSubprocessReporter } from "../../lib/display/subprocess-output.js";
+import { createVerboseSubprocessReporter, writeNormalSubprocessStatus } from "../../lib/display/subprocess-output.js";
 
 function captureStdout(fn) {
   const originalWrite = process.stdout.write;
@@ -55,6 +55,32 @@ test("disabled verbose subprocess reporter writes nothing", () => {
   });
 
   assert.equal(output, "");
+});
+
+test("normal subprocess status uses verbose argument formatting in a group", () => {
+  const output = captureStdout(() => {
+    writeNormalSubprocessStatus({
+      command: "tool",
+      args: ["safe", "two words", "quote\"me", "path/ok:=@+-"],
+      inGroup: true,
+    });
+  });
+
+  assert.equal(output, '│  • tool safe "two words" "quote\\"me" path/ok:=@+-\n');
+});
+
+test("normal subprocess status supports display args and top-level output", () => {
+  const output = captureStdout(() => {
+    writeNormalSubprocessStatus({
+      command: "codex",
+      args: ["exec", "secret prompt"],
+      displayArgs: ["exec", "<prompt: 13 chars>"],
+      inGroup: false,
+    });
+  });
+
+  assert.equal(output, "• codex exec \"<prompt: 13 chars>\"\n");
+  assert.doesNotMatch(output, /secret prompt/);
 });
 
 test("verbose subprocess reporter keeps CRLF split across chunks as one line and escapes controls", () => {

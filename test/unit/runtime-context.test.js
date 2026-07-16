@@ -144,12 +144,74 @@ test("terminateActiveChildren kills alive children", () => {
   }
 });
 
-test("installSignalHandlers sets up signal handlers", () => {
+test("installSignalHandlers is idempotent and its disposer restores listener counts", (t) => {
   const ctx = new RuntimeContext();
-  // Should not throw
-  ctx.installSignalHandlers();
-  // Verify the handler was registered by emitting SIGINT
-  // This would trigger process.exit, so we can't test it directly
-  // Just verify the method exists and doesn't throw
-  assert.ok(true);
+  const existingListeners = {
+    SIGINT: new Set(process.listeners("SIGINT")),
+    SIGTERM: new Set(process.listeners("SIGTERM")),
+  };
+  const before = {
+    SIGINT: process.listenerCount("SIGINT"),
+    SIGTERM: process.listenerCount("SIGTERM"),
+  };
+  t.after(() => {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      for (const listener of process.listeners(signal)) {
+        if (!existingListeners[signal].has(listener)) process.removeListener(signal, listener);
+      }
+    }
+  });
+
+  const disposeFirst = ctx.installSignalHandlers();
+  const disposeSecond = ctx.installSignalHandlers();
+
+  assert.equal(process.listenerCount("SIGINT"), before.SIGINT + 1);
+  assert.equal(process.listenerCount("SIGTERM"), before.SIGTERM + 1);
+  assert.equal(disposeSecond, disposeFirst);
+  disposeFirst();
+  disposeFirst();
+  assert.equal(process.listenerCount("SIGINT"), before.SIGINT);
+  assert.equal(process.listenerCount("SIGTERM"), before.SIGTERM);
+});
+
+test("signal handling reports and terminates exactly once with a failure exit code", (t) => {
+  const ctx = new RuntimeContext();
+  const existingListeners = {
+    SIGINT: new Set(process.listeners("SIGINT")),
+    SIGTERM: new Set(process.listeners("SIGTERM")),
+  };
+  const originalWrite = process.stderr.write;
+  const originalExitCode = process.exitCode;
+  const stderr = [];
+  let terminationCount = 0;
+  ctx.terminateActiveChildren = () => {
+    terminationCount += 1;
+  };
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  process.exitCode = 0;
+  const dispose = ctx.installSignalHandlers();
+  t.after(() => {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      for (const listener of process.listeners(signal)) {
+        if (!existingListeners[signal].has(listener)) process.removeListener(signal, listener);
+      }
+    }
+  });
+
+  try {
+    process.emit("SIGINT", "SIGINT");
+    process.emit("SIGTERM", "SIGTERM");
+
+    assert.equal(ctx.signal.aborted, true);
+    assert.equal(process.exitCode, 1);
+    assert.equal(terminationCount, 1);
+    assert.equal(stderr.join("").match(/received; terminating subprocesses/g)?.length, 1);
+  } finally {
+    dispose?.();
+    process.stderr.write = originalWrite;
+    process.exitCode = originalExitCode;
+  }
 });

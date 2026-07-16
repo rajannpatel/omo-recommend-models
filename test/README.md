@@ -20,7 +20,9 @@ When changing model selection or provider probing, cover these cases:
 
 1. A probed available model remains eligible for `model` or `fallback_models`.
 2. An advertised model whose probe fails is excluded from both `model` and `fallback_models`.
-3. A different available model from the same provider remains eligible when one sibling model fails.
-4. Invalid provider/model spellings are rejected without blocking valid refs from other providers.
+3. A different available model from the same provider remains eligible when one sibling model fails with a model-specific unavailable or policy/guardrail error.
+4. Terminal provider failures reject the provider instead of allowing unprobed sibling refs.
+5. Invalid provider/model spellings are rejected without blocking valid refs from other providers.
+6. Final recommendations keep compact provider slots: at most one non-free and one zero-cost model per provider across `model + fallback_models`.
 
 Prefer focused unit coverage in `test/unit/paid-provider-prep.test.js`, `test/unit/rules-assignment.test.js`, or `test/unit/apply-recommendations.test.js`. Add one integration test only when the full CLI surface needs to prove the behavior.

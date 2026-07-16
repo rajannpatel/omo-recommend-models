@@ -375,9 +375,7 @@ test("end-to-end ruleChainMatched pipeline: createRuleBasedRecommendations → c
   const sisyphus = ruleResult.cloudRecommendations.find((rec) => rec.name === "sisyphus");
   assert.equal(sisyphus.ruleChainMatched, true, "rule-chain matched entry should have ruleChainMatched: true");
 
-  // Capture the original model and fallback_models before finalization/ranking
   const originalModel = { ...sisyphus.model };
-  const originalFallbackModels = sisyphus.fallback_models.map(f => ({ ...f }));
 
   // Step 2: Complete AI recommendations (finalization)
   const completed = completeAiRecommendations(
@@ -395,18 +393,18 @@ test("end-to-end ruleChainMatched pipeline: createRuleBasedRecommendations → c
   // Verify ruleChainMatched survives finalization
   const completedSisyphus = completed.cloudRecommendations.find((rec) => rec.name === "sisyphus");
   assert.equal(completedSisyphus.ruleChainMatched, true, "ruleChainMatched should survive completeAiRecommendations");
+  const finalizedFallbackModels = completedSisyphus.fallback_models.map(f => ({ ...f }));
 
   // Step 3: Rank fallbacks by fitness (AI ranking - should skip rule-chain entries)
   // This may call opencode binary if available, but rule-chain entries are guarded
   await rankFallbacksByFitness(completed.cloudRecommendations, cloudLookup);
 
-  // Verify rule-chain-matched entry: model unchanged, fallbacks reordered by AI, aiUsedModel set
   const finalSisyphus = completed.cloudRecommendations.find((rec) => rec.name === "sisyphus");
   assert.deepEqual(finalSisyphus.model, originalModel, "ruleChainMatched entry model must remain unchanged after ranking");
-  assert.equal(finalSisyphus.fallback_models.length, originalFallbackModels.length,
-    "ruleChainMatched entry should keep the same number of fallbacks after ranking");
+  assert.equal(finalSisyphus.fallback_models.length, finalizedFallbackModels.length,
+    "ruleChainMatched entry should keep the same finalized fallback count after ranking");
   // Fallbacks may be reordered by AI ranking; verify the same set of refs is present
-  const originalRefs = new Set(originalFallbackModels.map(f => `${f.provider}/${f.model}`));
+  const originalRefs = new Set(finalizedFallbackModels.map(f => `${f.provider}/${f.model}`));
   const finalRefs = new Set(finalSisyphus.fallback_models.map(f => `${f.provider}/${f.model}`));
   assert.deepEqual([...finalRefs].sort(), [...originalRefs].sort(),
     "ruleChainMatched entry must keep the same set of fallback refs after ranking");

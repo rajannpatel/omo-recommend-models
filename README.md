@@ -49,15 +49,13 @@ Output (abridged — actual output varies by hardware and provider availability)
 │  • agents.sisyphus
 │    ◦ model: <provider>/<model>
 │    ◦ fallback_models:
-│      1. <zero-cost-provider>/<zero-cost-model-a>
-│      2. <zero-cost-provider>/<zero-cost-model-b>
-│      3. <paid-provider>/<paid-model>
+│      1. <zero-cost-provider>/<zero-cost-model>
+│      2. <paid-provider>/<paid-model>
 │  • agents.oracle
 │    ◦ model: <zero-cost-provider>/<zero-cost-model-a>
 │    ◦ fallback_models:
-│      1. <zero-cost-provider>/<zero-cost-model-b>
-│      2. <paid-provider>/<paid-model>
-│      3. <local-provider>/<local-model>
+│      1. <paid-provider>/<paid-model>
+│      2. <local-provider>/<local-model>
 │  • ...(remaining agents and categories follow the same pattern)
 │
 ◇  Choosing to apply will:
@@ -225,11 +223,11 @@ Stages 1 and 2 use different `matchModel()` strategies from `lib/recommend/model
 By default, the CLI starts from upstream `rules(model-core)` fallback chains. The CLI then:
 
 1. Picks or preserves the primary `model` from the rule chain.
-2. Adds cloud `fallback_models` entries from rule chains.
-3. Fills in missing cloud providers with each provider's highest-scored model, so a config is not dominated by one provider.
+2. Adds cloud `fallback_models` entries from rule chains, but only when the exact `provider/model` ref survived probing and active exclusion rules.
+3. Fills in missing cloud providers with each provider's highest-scored verified model, so a config is not dominated by one provider.
 4. Adds at most one computed local fallback for each entry when local discovery finds a fitting candidate for that entry's role.
 5. Creates a local `keep` decision for installed picks and an `install` decision for missing picks. Missing local models are not written to config unless installation is confirmed; `--no-install` leaves them out.
-6. Deduplicates `fallback_models`, removes anything that duplicates the primary model, and orders local fallbacks last after cloud fallbacks.
+6. Deduplicates `fallback_models`, removes anything that duplicates the primary model, keeps at most one non-free and one zero-cost model per provider across `model + fallback_models`, and orders local fallbacks last after cloud fallbacks.
 7. If no primary model remains but fallbacks exist, promotes the first fallback to `model`.
 
 ## How the AI model-fitness ranking works
@@ -238,9 +236,9 @@ When the deterministic upstream rule chain cannot find matching models for an en
 
 ### Which models do the ranking
 
-The ranking is performed by **zero-cost evaluator models** — models whose cached OpenCode catalog metadata reports `cost.input === 0` and `cost.output === 0` and supports tool calls. The evaluator selector reads local/project model catalog files, then falls back to `opencode models opencode` when needed. If no zero-cost models are available, AI ranking is skipped and the heuristic recommendation order is preserved.
+The ranking first tries **zero-cost evaluator models** — models whose cached OpenCode catalog metadata reports `cost.input === 0` and `cost.output === 0` and supports tool calls. The evaluator selector reads local/project model catalog files, then falls back to `opencode models opencode` when needed. If no zero-cost evaluators are available, or if every zero-cost evaluator fails during the run, the CLI falls back to the best available **validated paid** evaluators: paid `provider/model` refs that survived provider probing and active exclusion rules. If neither zero-cost nor validated paid evaluators can rank an entry, the heuristic recommendation order is preserved.
 
-These zero-cost models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
+These evaluator models are queried **only for ranking other models' fitness**. They are not themselves necessarily installed or written as primary models — they serve as impartial judges.
 
 > [!NOTE]
 > If `--agy-analysis` or `--codex-analysis` is passed, the tool will skip the zero-cost evaluator models entirely and instead invoke the selected local CLI tool (`agy` or `codex` respectively) in the terminal to rank eligible entries: non-rule-chain recommendations with more than one fallback candidate.
@@ -269,13 +267,13 @@ The plugin prioritizes a deterministic matching chain defined in [model-requirem
 #### 2. Zero-Cost Fallback Supplementation
 To protect against paid API quota exhaustion or rate limits, the tool supplements fallback chains with available zero-cost models when allowed candidates exist.
 * Rule-chain recommendations can append zero-cost fallback models through `withMinimumFreeFallbacks` after preserving existing rule-chain and provider fallbacks.
-* Finalization also appends every allowed zero-cost, tool-call-capable cloud model after missing-provider fallback filling, so unmatched entries receive the same zero-cost fallback coverage.
+* Finalization also considers allowed zero-cost, tool-call-capable cloud models after missing-provider fallback filling, so unmatched entries receive zero-cost fallback coverage when a verified candidate exists.
 * Available paid provider models (such as `xai/grok-4.20-0309-reasoning` or `google` models) can appear before zero-cost models when they are selected by the rule chain or missing-provider fallback logic.
 
-#### 3. Per-Provider Paid Model Limits
+#### 3. Per-Provider Model Limits
 For agents/categories where a Google model (like `google/gemini-3.1-pro-preview`) is the primary model:
-* The finalizer enforces a strict constraint of **at most one non-free model per provider** across the entire recommendation (model + fallbacks combined). This prevents multiple paid slots from being occupied by the same provider.
-* Because the primary model occupies the paid slot for `google`, any other Google model (like `google/gemma-4-31b-it`) is filtered out of `fallback_models`. Zero-cost models from any provider are exempt from this limit, which is why they remain.
+* The finalizer enforces a strict constraint of **at most one non-free model and one zero-cost model per provider** across the entire recommendation (model + fallbacks combined). This prevents multiple paid slots or a long free-model list from being occupied by the same provider.
+* Because the primary model occupies the paid slot for `google`, any other Google model (like `google/gemma-4-31b-it`) is filtered out of `fallback_models`. A separate verified zero-cost Google model could still occupy the provider's zero-cost slot.
 
 #### 4. AI-Ranked Entries Respect Provider Constraints
 For entries that do not match the rule chain (like `hephaestus` or `sysadmin`), AI ranking is performed:
@@ -307,12 +305,12 @@ Any model ref the AI outputs that cannot be matched to the actual available pool
 
 ### Round-robin concurrency model
 
-Entries that need AI ranking are processed **sequentially**, with one important optimization to rotate evenly across available evaluator models:
+Entries that need AI ranking are processed **sequentially**, with one important optimization to rotate evenly across the active evaluator set. Zero-cost evaluators are always tried first; validated paid evaluators become the active set only when no zero-cost evaluator is available or when all zero-cost evaluators fail.
 
-- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads ranking requests uniformly across available zero-cost evaluator models rather than hammering the first model with all requests.
-- **No per-entry model retry loop**: each entry receives the next available evaluator model. If that model fails or returns an invalid ranking, it is blacklisted for the rest of the run; affected recommendations keep their heuristic order after the blacklisted model is removed from primary, fallback, and routing candidates, promoting the next fallback when needed.
+- **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads ranking requests uniformly across the active evaluator set rather than hammering the first model with all requests.
+- **No per-entry model retry loop**: each entry receives the next available evaluator model. If that model fails or returns an invalid ranking, it is blacklisted for the rest of the run; affected recommendations keep their heuristic order after the blacklisted model is removed from primary, fallback, and routing candidates, promoting the next fallback when needed. If the zero-cost evaluator set is exhausted this way, ranking continues with validated paid evaluators.
 - **Concurrency ceiling**: provider probes run sequentially, and AI ranking also invokes at most one evaluator subprocess at a time.
-- **Fail-open**: if all evaluator models fail, recommendations keep the finalization pipeline's heuristic ordering after blacklisted evaluator refs are filtered out. The CLI prints a summary of how many entries were ranked and which models were used.
+- **Fail-open**: if both zero-cost and validated paid evaluator models fail, recommendations keep the finalization pipeline's heuristic ordering after blacklisted evaluator refs are filtered out. The CLI prints a summary of how many entries were ranked and which models were used.
 
 ### How the ranking process is exposed to the user
 
