@@ -644,6 +644,25 @@ function assertRecommendationRefs(stdout, expectedRefs) {
   assert.deepEqual(recommendationRefs(stdout), expectedRefs);
 }
 
+function assertSameProviderInvocationSet(harness, expectedRefs) {
+  // perProvider defaults to 2, so same-provider real subprocesses can race;
+  // only the unordered set of invoked refs is deterministic here.
+  assert.deepEqual([...harness.invocations()].sort(), [...expectedRefs].sort());
+}
+
+function assertRacedProviderExhaustion(lines, ref, provider) {
+  // perProvider defaults to 2: whether a same-provider ref queued behind the
+  // exhausting probe gets a dispatch slot before the exhaustion is detected
+  // is a real subprocess timing race. Both outcomes keep it out of the final
+  // recommendation, so either printed line is acceptable here.
+  const skippedLine = `✗  model: ${ref} on provider: ${provider} is quota-exceeded (not probed after provider exhaustion)`;
+  const invalidatedLine = `✗  model: ${ref} on provider: ${provider} is provider-quota-exhausted`;
+  assert.ok(
+    lines.includes(skippedLine) || lines.includes(invalidatedLine),
+    `expected one of:\n  ${skippedLine}\n  ${invalidatedLine}\ngot: ${JSON.stringify(lines)}`,
+  );
+}
+
 function policyCacheBytes(refs) {
   return `${JSON.stringify(
     { schemaVersion: 1, policyExcludedModelRefs: [...refs].sort() },
@@ -670,7 +689,7 @@ test("real CLI probes every advertised Google ref, including string-only interle
 
   const result = harness.run();
 
-  assert.deepEqual(harness.invocations(), refs);
+  assertSameProviderInvocationSet(harness, refs);
   assertProbeTranscript(
     result,
     refs.map((ref) => `✓  model: ${ref} on provider: google is available`),
@@ -691,26 +710,26 @@ test("real CLI probes every advertised Google ref, including string-only interle
 test("real CLI reprobes transient refs while caching only the exact policy failure", (t) => {
   const refs = [
     "google/gemini-3.1-pro",
-    "google/limited",
+    "google/unavailable",
     "google/policy",
     "google/gemini-3-flash",
   ];
   const harness = createProviderProbeHarness(t, {
     entries: refs.map((ref) => ({ ref, metadata: providerMetadata(1) })),
     outcomes: {
-      [refs[1]]: { kind: "rate-limited" },
+      [refs[1]]: { kind: "model-unavailable" },
       [refs[2]]: { kind: "policy" },
     },
   });
 
   const first = harness.run();
 
-  assert.deepEqual(harness.invocations(), refs);
+  assertSameProviderInvocationSet(harness, refs);
   assertProbeTranscript(
     first,
     [
       `✓  model: ${refs[0]} on provider: google is available`,
-      `✗  model: ${refs[1]} on provider: google is rate limited`,
+      `✗  model: ${refs[1]} on provider: google is model-unavailable`,
       `✗  model: ${refs[2]} on provider: google is guardrail-policy-exclusion`,
       `✓  model: ${refs[3]} on provider: google is available`,
     ],
@@ -722,12 +741,12 @@ test("real CLI reprobes transient refs while caching only the exact policy failu
   harness.clearInvocations();
   const second = harness.run();
 
-  assert.deepEqual(harness.invocations(), [refs[0], refs[1], refs[3]]);
+  assertSameProviderInvocationSet(harness, [refs[0], refs[1], refs[3]]);
   assertProbeTranscript(
     second,
     [
       `✓  model: ${refs[0]} on provider: google is available`,
-      `✗  model: ${refs[1]} on provider: google is rate limited`,
+      `✗  model: ${refs[1]} on provider: google is model-unavailable`,
       `✗  model: ${refs[2]} on provider: google is guardrail-policy-exclusion (cached)`,
       `✓  model: ${refs[3]} on provider: google is available`,
     ],
@@ -738,7 +757,43 @@ test("real CLI reprobes transient refs while caching only the exact policy failu
   assertHermeticProbeHarness(harness);
 });
 
-test("real CLI literal strong exhaustion spawns exactly the first two Google refs", (t) => {
+test("real CLI rate-limited ref cools down its provider without invalidating a prior success", (t) => {
+  const refs = [
+    "google/ok-before",
+    "google/limited",
+    "google/after-limit",
+  ];
+  const harness = createProviderProbeHarness(t, {
+    entries: refs.map((ref) => ({ ref, metadata: providerMetadata(1) })),
+    outcomes: { [refs[1]]: { kind: "rate-limited" } },
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const invoked = new Set(harness.invocations());
+  assert.equal(invoked.has(refs[0]), true);
+  assert.equal(invoked.has(refs[1]), true);
+  const lines = probeResultLines(result.stdout);
+  assert.ok(lines.includes(`✓  model: ${refs[0]} on provider: google is available`));
+  assert.ok(lines.includes(`✗  model: ${refs[1]} on provider: google is rate limited`));
+  // Unlike quota exhaustion, a rate-limit cooldown does not invalidate other
+  // probes: refs[2] either never gets a dispatch slot before the cooldown
+  // (skipped) or wins the race and succeeds (available) - both are correct.
+  assert.ok(
+    lines.includes(`✗  model: ${refs[2]} on provider: google is rate limited (not probed after provider exhaustion)`) ||
+      lines.includes(`✓  model: ${refs[2]} on provider: google is available`),
+    `unexpected line for ${refs[2]}: ${JSON.stringify(lines)}`,
+  );
+  // Recommendation finalization re-checks isProviderAvailable(), which
+  // returns false while rateLimitedUntil is active - so the whole provider
+  // is excluded from config even though refs[0]'s probe record itself was
+  // never invalidated. Deterministic regardless of the refs[2] race above.
+  assert.deepEqual(recommendationRefs(result.stdout), []);
+  assertHermeticProbeHarness(harness);
+});
+
+test("real CLI literal strong exhaustion excludes every Google ref from the recommendation", (t) => {
   const refs = [
     "google/ok-before",
     "google/quota",
@@ -751,16 +806,14 @@ test("real CLI literal strong exhaustion spawns exactly the first two Google ref
 
   const result = harness.run();
 
-  assert.deepEqual(harness.invocations(), [refs[0], refs[1]]);
-  assertProbeTranscript(
-    result,
-    [
-      `✗  model: ${refs[0]} on provider: google is provider-quota-exhausted`,
-      `✗  model: ${refs[1]} on provider: google is quota-exceeded`,
-      `✗  model: ${refs[2]} on provider: google is quota-exceeded (not probed after provider exhaustion)`,
-    ],
-    "◇  Cloud model verification complete: 3 eligible; 2 probed, 0 available, 2 failed, 0 cached, 1 skipped",
-  );
+  assert.equal(result.status, 0, result.stderr);
+  const invoked = new Set(harness.invocations());
+  assert.equal(invoked.has(refs[0]), true);
+  assert.equal(invoked.has(refs[1]), true);
+  const lines = probeResultLines(result.stdout);
+  assert.ok(lines.includes(`✗  model: ${refs[0]} on provider: google is provider-quota-exhausted`));
+  assert.ok(lines.includes(`✗  model: ${refs[1]} on provider: google is quota-exceeded`));
+  assertRacedProviderExhaustion(lines, refs[2], "google");
   assert.deepEqual(recommendationRefs(result.stdout), []);
   assertHermeticProbeHarness(harness);
 });
@@ -780,21 +833,18 @@ test("real CLI preserves interleaved advertised order through strong exhaustion"
 
   const result = harness.run();
 
-  const invocations = harness.invocations();
-  assert.deepEqual(invocations.filter((ref) => ref.startsWith("google/")), [refs[0], refs[2]]);
-  assert.deepEqual(invocations.filter((ref) => ref.startsWith("openai/")), [refs[1], refs[4]]);
-  assert.equal(invocations.includes(refs[3]), false);
-  assertProbeTranscript(
-    result,
-    [
-      `✗  model: ${refs[0]} on provider: google is provider-quota-exhausted`,
-      `✓  model: ${refs[1]} on provider: openai is available`,
-      `✗  model: ${refs[2]} on provider: google is quota-exceeded`,
-      `✗  model: ${refs[3]} on provider: google is quota-exceeded (not probed after provider exhaustion)`,
-      `✓  model: ${refs[4]} on provider: openai is available`,
-    ],
-    "◇  Cloud model verification complete: 5 eligible; 4 probed, 2 available, 2 failed, 0 cached, 1 skipped",
-  );
+  assert.equal(result.status, 0, result.stderr);
+  const invoked = new Set(harness.invocations());
+  assert.equal(invoked.has(refs[0]), true);
+  assert.equal(invoked.has(refs[1]), true);
+  assert.equal(invoked.has(refs[2]), true);
+  assert.equal(invoked.has(refs[4]), true);
+  const lines = probeResultLines(result.stdout);
+  assert.ok(lines.includes(`✗  model: ${refs[0]} on provider: google is provider-quota-exhausted`));
+  assert.ok(lines.includes(`✓  model: ${refs[1]} on provider: openai is available`));
+  assert.ok(lines.includes(`✗  model: ${refs[2]} on provider: google is quota-exceeded`));
+  assertRacedProviderExhaustion(lines, refs[3], "google");
+  assert.ok(lines.includes(`✓  model: ${refs[4]} on provider: openai is available`));
   assertRecommendationRefs(result.stdout, [refs[1]]);
   assert.doesNotMatch(result.stdout, /◦ model: google\/|\d+\. google\//);
   assertHermeticProbeHarness(harness);
@@ -821,7 +871,7 @@ test("real CLI cache skips only advertised exact refs and flushes before same-ru
 
   const first = harness.run();
 
-  assert.deepEqual(harness.invocations(), refs);
+  assertSameProviderInvocationSet(harness, refs);
   assertProbeTranscript(
     first,
     [
@@ -862,7 +912,7 @@ test("real CLI cache skips only advertised exact refs and flushes before same-ru
   harness.clearInvocations();
   const third = harness.run(["--flush-cache"]);
 
-  assert.deepEqual(harness.invocations(), refs);
+  assertSameProviderInvocationSet(harness, refs);
   assertProbeTranscript(
     third,
     refs.map((ref) => `✓  model: ${ref} on provider: google is available`),

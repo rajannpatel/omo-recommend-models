@@ -675,18 +675,17 @@ test("runProviderProbes prints every final record template and exact aggregate a
   const eligibleRefs = [
     "google/cached",
     "google/available",
-    "google/limited",
     "google/policy",
-    "google/in-flight",
-    "google/after-abort",
+    "google/limited",
+    "google/skipped-after-limit",
   ];
   const results = new Map([
-    ["google/limited", { ok: false, reason: "rate-limited", scope: "model" }],
     ["google/policy", {
       ok: false,
       reason: "guardrail-policy-exclusion",
       scope: "model",
     }],
+    ["google/limited", { ok: false, reason: "rate-limited", scope: "model", errorOutput: "Retry-After: 30" }],
   ]);
 
   const { output, value: probes } = await captureStdout(async () => {
@@ -694,27 +693,20 @@ test("runProviderProbes prints every final record template and exact aggregate a
       ctx,
       eligibleRefs,
       probeConcurrency: { global: 1, perProvider: 1 },
-      probeModelFn: async (_ctx, modelRef) => {
-        if (modelRef === "google/in-flight") {
-          ctx.abortController.abort();
-          return { ok: false, reason: "aborted", scope: "model" };
-        }
-        return results.get(modelRef) || { ok: true };
-      },
+      probeModelFn: async (_ctx, modelRef) => results.get(modelRef) || { ok: true },
     });
     await value.ensureProbesAwaited();
     return value;
   });
 
   assert.equal(output, [
-    "◇  Probing 6 model(s) across AI providers...",
+    "◇  Probing 5 model(s) across AI providers...",
     "✗  model: google/cached on provider: google is guardrail-policy-exclusion (cached)",
     "✓  model: google/available on provider: google is available",
-    "✗  model: google/limited on provider: google is rate limited",
     "✗  model: google/policy on provider: google is guardrail-policy-exclusion",
-    "✗  model: google/in-flight on provider: google is aborted",
-    "✗  model: google/after-abort on provider: google is aborted (not probed after interruption)",
-    "◇  Cloud model verification complete: 6 eligible; 4 probed, 1 available, 3 failed, 1 cached, 1 skipped",
+    "✗  model: google/limited on provider: google is rate limited",
+    "✗  model: google/skipped-after-limit on provider: google is rate limited (not probed after provider exhaustion)",
+    "◇  Cloud model verification complete: 5 eligible; 3 probed, 1 available, 2 failed, 1 cached, 1 skipped",
     "",
   ].join("\n"));
   assert.equal(

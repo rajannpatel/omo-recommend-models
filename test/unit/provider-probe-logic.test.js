@@ -188,14 +188,12 @@ test("runProviderProbes probes every eligible ref and returns ordered records", 
   assert.doesNotMatch(stdout, /verified \d+\/\d+|~30s|Cloud provider verification/);
 });
 
-test("runProviderProbes continues transient siblings and persists only live policy failures", async () => {
+test("runProviderProbes continues transient failures on the same provider but cools it down after a rate-limit, without blocking sibling providers", async () => {
   const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
   const ctx = createProbeContext();
   const cache = memoryPolicyCache();
   ctx.policyExclusionCache = cache;
-  const invocations = [];
   const results = new Map([
-    ["google/limited", { ok: false, reason: "rate-limited", scope: "model" }],
     ["google/timeout", { ok: false, reason: "timeout", scope: "model" }],
     ["google/policy", {
       ok: false,
@@ -203,34 +201,63 @@ test("runProviderProbes continues transient siblings and persists only live poli
       scope: "model",
       errorOutput: "forbidden by data policy",
     }],
+    ["google/limited", { ok: false, reason: "rate-limited", scope: "model", errorOutput: "Retry-After: 30" }],
   ]);
+  const deferred = createDeferredProbeFn((modelRef) => results.get(modelRef) || { ok: true });
   const eligibleRefs = [
     "google/ok-1",
-    "google/limited",
     "google/timeout",
     "google/policy",
+    "google/limited",
     "google/ok-2",
+    "anthropic/sibling",
   ];
 
   const probes = await runProviderProbes({
     ctx,
     eligibleRefs,
-    probeModelFn: createProbeFn(invocations, (modelRef) => results.get(modelRef) || { ok: true }),
+    probeConcurrency: { global: 2, perProvider: 1 },
+    probeModelFn: deferred.probeFn,
   });
+  await Promise.resolve();
+
+  assert.deepEqual(deferred.started, ["google/ok-1", "anthropic/sibling"]);
+  await deferred.resolveRef("google/ok-1");
+  await waitForSchedulerTurn();
+  assert.deepEqual(deferred.started, ["google/ok-1", "anthropic/sibling", "google/timeout"]);
+  await deferred.resolveRef("google/timeout");
+  await waitForSchedulerTurn();
+  assert.deepEqual(deferred.started, ["google/ok-1", "anthropic/sibling", "google/timeout", "google/policy"]);
+  await deferred.resolveRef("google/policy");
+  await waitForSchedulerTurn();
+  assert.deepEqual(
+    deferred.started,
+    ["google/ok-1", "anthropic/sibling", "google/timeout", "google/policy", "google/limited"],
+  );
+  await deferred.resolveRef("google/limited");
+  await deferred.resolveRef("anthropic/sibling");
   await probes.ensureProbesAwaited();
 
-  assert.deepEqual(invocations, eligibleRefs);
+  // google/ok-2 was still queued when the rate-limit closed the provider, so it never dispatched.
+  assert.deepEqual(
+    deferred.started,
+    ["google/ok-1", "anthropic/sibling", "google/timeout", "google/policy", "google/limited"],
+  );
   assert.deepEqual(cache.added, ["google/policy"]);
   assert.deepEqual(cache.values(), ["google/policy"]);
-  assert.deepEqual(await probes.paidProbesPromise, ["google/ok-1", "google/ok-2"]);
+  // google/ok-1 succeeded, but google is rate-limited by the time this
+  // resolves - paidProbesPromise excludes it so nothing re-dispatches a
+  // live opencode run against a provider currently cooling down.
+  assert.deepEqual(await probes.paidProbesPromise, ["anthropic/sibling"]);
   assert.deepEqual(await probes.rejectedPaidModelsPromise, [
-    "google/limited",
     "google/timeout",
     "google/policy",
+    "google/limited",
+    "google/ok-2",
   ]);
   assert.deepEqual(
     [...(await probes.rejectedPaidModelDetailsPromise).keys()],
-    ["google/limited", "google/timeout", "google/policy"],
+    ["google/timeout", "google/policy", "google/limited", "google/ok-2"],
   );
 });
 
@@ -495,6 +522,114 @@ test("runProviderProbes invalidates earlier success only after strong provider e
   );
   assert.equal(ctx.quotaExceededProviders.has("google"), true);
   assert.equal(ctx.providerAvailability.get("google")?.creditExhausted, true);
+});
+
+test("runProviderProbes cools down a rate-limited provider without blocking other providers", async () => {
+  const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
+  const ctx = createProbeContext();
+  const deferred = createDeferredProbeFn((modelRef) =>
+    modelRef === "google/limited"
+      ? { ok: false, reason: "rate-limited", scope: "model", errorOutput: "Retry-After: 30" }
+      : { ok: true });
+  const eligibleRefs = [
+    "google/limited",
+    "google/skipped-later",
+    "anthropic/ok",
+    "xai/ok",
+  ];
+
+  const probes = await runProviderProbes({
+    ctx,
+    eligibleRefs,
+    probeConcurrency: { global: 3, perProvider: 1 },
+    probeModelFn: deferred.probeFn,
+  });
+  await Promise.resolve();
+  await deferred.resolveRef("google/limited");
+  await deferred.drain();
+  await probes.ensureProbesAwaited();
+
+  assert.deepEqual(deferred.started, ["google/limited", "anthropic/ok", "xai/ok"]);
+  assert.deepEqual(
+    (await probes.probeRecordsPromise).map(({ modelRef, outcome, reason, spawned }) => ({
+      modelRef,
+      outcome,
+      reason,
+      spawned,
+    })),
+    [
+      { modelRef: "google/limited", outcome: "failed", reason: "rate-limited", spawned: true },
+      { modelRef: "google/skipped-later", outcome: "skipped-provider-exhausted", reason: "rate-limited", spawned: false },
+      { modelRef: "anthropic/ok", outcome: "available", reason: null, spawned: true },
+      { modelRef: "xai/ok", outcome: "available", reason: null, spawned: true },
+    ],
+  );
+  const googleState = ctx.providerAvailability.get("google");
+  assert.equal(typeof googleState?.rateLimitedUntil, "number");
+  assert.ok(googleState.rateLimitedUntil > Date.now());
+  assert.equal(googleState.creditExhausted, false);
+  assert.equal(ctx.quotaExceededProviders.has("google"), false);
+});
+
+test("runProviderProbes keeps a rate-limited provider's earlier probe record available but excludes it from paidProbesPromise", async () => {
+  const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
+  const ctx = createProbeContext();
+  const deferred = createDeferredProbeFn((modelRef) =>
+    modelRef === "google/limited"
+      ? { ok: false, reason: "rate-limited", scope: "model", errorOutput: "Retry-After: 30" }
+      : { ok: true });
+
+  const probes = await runProviderProbes({
+    ctx,
+    eligibleRefs: ["google/slow-success", "google/limited", "google/skipped-later"],
+    probeConcurrency: { global: 2, perProvider: 2 },
+    probeModelFn: deferred.probeFn,
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(deferred.started, ["google/slow-success", "google/limited"]);
+  await deferred.resolveRef("google/limited");
+  await deferred.resolveRef("google/slow-success");
+  await probes.ensureProbesAwaited();
+
+  // The probe record itself is not invalidated (unlike quota exhaustion) -
+  // it genuinely succeeded. But paidProbesPromise feeds callers (e.g. the
+  // fitness-ranking paid-evaluator fallback) that will spawn ANOTHER live
+  // `opencode run` against this ref, so it must respect the provider's
+  // current rate-limit cooldown rather than trusting a stale success.
+  assert.deepEqual(await probes.paidProbesPromise, []);
+  assert.deepEqual(
+    (await probes.probeRecordsPromise).map(({ modelRef, outcome, reason, source, spawned }) => ({
+      modelRef,
+      outcome,
+      reason,
+      source,
+      spawned,
+    })),
+    [
+      {
+        modelRef: "google/slow-success",
+        outcome: "available",
+        reason: null,
+        source: "probe",
+        spawned: true,
+      },
+      {
+        modelRef: "google/limited",
+        outcome: "failed",
+        reason: "rate-limited",
+        source: "probe",
+        spawned: true,
+      },
+      {
+        modelRef: "google/skipped-later",
+        outcome: "skipped-provider-exhausted",
+        reason: "rate-limited",
+        source: "orchestrator",
+        spawned: false,
+      },
+    ],
+  );
 });
 
 test("runProviderProbes keeps global order while skipping later refs from an exhausted provider", async () => {
