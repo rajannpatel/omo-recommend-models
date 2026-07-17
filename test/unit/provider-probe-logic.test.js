@@ -3,6 +3,72 @@ import test from "node:test";
 
 import { RuntimeContext } from "../../lib/runtime-context.js";
 
+test("detectDefaultProbeGlobalConcurrency prefers availableParallelism over cpus().length", async () => {
+  const { detectDefaultProbeGlobalConcurrency } = await import(
+    "../../lib/recommend/providers/probe-orchestration.js"
+  );
+  assert.equal(
+    detectDefaultProbeGlobalConcurrency({
+      availableParallelism: () => 8,
+      cpus: () => Array.from({ length: 4 }),
+    }),
+    8,
+  );
+});
+
+test("detectDefaultProbeGlobalConcurrency falls back to cpus().length when availableParallelism is absent", async () => {
+  const { detectDefaultProbeGlobalConcurrency } = await import(
+    "../../lib/recommend/providers/probe-orchestration.js"
+  );
+  assert.equal(
+    detectDefaultProbeGlobalConcurrency({
+      cpus: () => Array.from({ length: 5 }),
+    }),
+    5,
+  );
+});
+
+test("detectDefaultProbeGlobalConcurrency respects a genuinely detected single-core host", async () => {
+  const { detectDefaultProbeGlobalConcurrency } = await import(
+    "../../lib/recommend/providers/probe-orchestration.js"
+  );
+  assert.equal(
+    detectDefaultProbeGlobalConcurrency({
+      availableParallelism: () => 1,
+      cpus: () => Array.from({ length: 1 }),
+    }),
+    1,
+  );
+});
+
+test("detectDefaultProbeGlobalConcurrency floors at 2 when both detection sources are unusable", async () => {
+  const { detectDefaultProbeGlobalConcurrency } = await import(
+    "../../lib/recommend/providers/probe-orchestration.js"
+  );
+  assert.equal(
+    detectDefaultProbeGlobalConcurrency({
+      availableParallelism: () => undefined,
+      cpus: () => [],
+    }),
+    2,
+  );
+});
+
+test("detectDefaultProbeGlobalConcurrency falls back to cpus().length when availableParallelism throws", async () => {
+  const { detectDefaultProbeGlobalConcurrency } = await import(
+    "../../lib/recommend/providers/probe-orchestration.js"
+  );
+  assert.equal(
+    detectDefaultProbeGlobalConcurrency({
+      availableParallelism: () => {
+        throw new Error("blocked in this sandbox");
+      },
+      cpus: () => Array.from({ length: 3 }),
+    }),
+    3,
+  );
+});
+
 function createProbeContext() {
   return new RuntimeContext();
 }
@@ -155,6 +221,7 @@ test("runProviderProbes probes every eligible ref and returns ordered records", 
     const value = await runProviderProbes({
       ctx,
       eligibleRefs,
+      probeConcurrency: { global: 4, perProvider: 2 },
       probeModelFn: createProbeFn(invocations),
     });
     await value.ensureProbesAwaited();
@@ -647,6 +714,7 @@ test("runProviderProbes keeps global order while skipping later refs from an exh
   const probes = await runProviderProbes({
     ctx,
     eligibleRefs,
+    probeConcurrency: { global: 4, perProvider: 2 },
     probeModelFn: createProbeFn(invocations, (modelRef) =>
       modelRef === "google/quota"
         ? { ok: false, reason: "quota-exceeded", scope: "provider" }
