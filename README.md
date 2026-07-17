@@ -27,11 +27,13 @@ $ npx omo-recommend-models --cloud-only --yes
 Output (abridged — actual output varies by hardware and provider availability):
 
 ```
-◇  Verifying availability for <N> cloud provider(s) — this may take ~30s...
-◇  Checking GPU: skipped by --cloud-only (0s)
-◇  Checking Ollama: skipped by --cloud-only (0s)
-◇  Loaded: <N> providers (live from `opencode models`) (2s)
-◇  Cloud provider verification complete: <N>/<N>
+◇  Checking live provider models...
+◇  <P> providers identified in `opencode models` output (2s)
+◇  Probing <M> model(s) across AI providers...
+✓  Checking GPU: skipped by --cloud-only
+✓  Checking Ollama: skipped by --cloud-only
+✓  Discovering local model catalog: skipped by --cloud-only
+◇  Cloud model verification complete: <M> eligible; <M> probed, <A> available, <F> failed, <C> cached, <S> skipped
 ◇  AI ranking <M> agent(s)/category(ies) by model fitness — processed 0/<M>
 │  → librarian by <zero-cost-provider>/<zero-cost-model>...
 │  ✓  processed  librarian by <zero-cost-provider>/<zero-cost-model>
@@ -159,14 +161,14 @@ These flags use an **opt-out** pattern — the behavior they control is enabled 
 Before any recommendation is made, the tool probes each discovered AI provider for availability and rate-limit status:
 
 - **State tracking** (`lib/providers/state.js`) — each provider records whether credits are exhausted, whether it is rate-limited until a future timestamp, and the reason for that state; availability is computed from those fields and the active exclusion options.
-- **Probe logic** (`lib/providers/probe.js`) — selected provider/model candidates are tested with lightweight requests, measuring response time and HTTP status. OpenRouter and OpenCode can probe multiple models; other providers start with the highest-ranked candidate and stop after the first successful probe or terminal non-availability failure.
+- **Probe logic** (`lib/providers/probe.js`) — every eligible model ref advertised by the provider's live `opencode models` output is queued and tested with a lightweight request, measuring response time and HTTP status, subject to the bounded concurrency scheduler described below. There is no "highest-ranked candidate only" shortcut — model-specific failures (unavailable model, guardrail/policy) are scoped to that one ref, while true provider-wide quota exhaustion closes out the rest of that provider's queue immediately.
 - **Error classification** (`lib/providers/errors.js`) — 402 (quota) and 429 (rate-limit) responses are identified; `Retry-After` headers are parsed for backoff.
 - **Provider and model exclusion** — quota-exhausted or currently rate-limited providers are excluded according to the active exclusion options, while some model-specific probe failures reject only the failing `provider/model` ref.
 
 #### Efficient Probing Architecture & Concurrency Control
 - **Single-Call Diagnosis**: Rather than making multiple separate diagnostic calls, the tool makes exactly **one lightweight test call (`say 1`)** to each tested model. We inspect the success status or the resulting error output of this single invocation to gather all reachability, rate limiting, billing quota, and guardrail/data policy restrictions in one go.
-- **Sequential Execution**: To prevent CPU/memory strain and database or file-locking conflicts when spawning subprocesses, provider probes are run **sequentially** (maximum of 1 concurrent `opencode` subprocess).
-- **Intelligent Short-Circuiting**: If a model probe fails with a true quota-exhausted error (e.g. HTTP 402, billing limit, insufficient funds), non-OpenRouter/non-OpenCode providers are marked credit-exhausted (`quota-exceeded`). When the sequential loop moves to check subsequent models from that provider, it checks the provider's status first and **short-circuits instantly** without spawning any new subprocesses.
+- **Bounded Concurrent Execution**: To balance throughput against CPU/memory strain and provider rate limits, provider probes are run with a bounded scheduler (default: up to 4 concurrent `opencode` subprocesses globally, at most 1 concurrent probe per individual provider, and at most 1 concurrent probe across free/local/CLI-backed candidates). Availability is rechecked immediately before each dispatch so quota/rate-limit state discovered mid-run is honored without spawning stale subprocesses.
+- **Intelligent Short-Circuiting**: If a model probe fails with a true quota-exhausted error (e.g. HTTP 402, billing limit, insufficient funds), non-OpenRouter/non-OpenCode providers are marked credit-exhausted (`quota-exceeded`) and any still-queued candidates from that provider are skipped instantly without spawning new subprocesses. Any probe that started concurrently before the exhaustion was detected has its result invalidated (successes are converted to `provider-quota-exhausted` failures) so a lucky race never leaks through.
 - **Model-Specific Resiliency**: Model-specific unavailable-model and policy/guardrail failures are isolated to the failing model. Authorization and quota-like failures can still mark non-OpenRouter/non-OpenCode providers unavailable, while OpenRouter/OpenCode keep those failures scoped more narrowly so other viable models from the provider can still be probed and used.
 
 
@@ -309,7 +311,7 @@ Entries that need AI ranking are processed **sequentially**, with one important 
 
 - **Round-robin initial assignment**: entry `i` starts its query with model `models[i % modelCount]`. This spreads ranking requests uniformly across the active evaluator set rather than hammering the first model with all requests.
 - **No per-entry model retry loop**: each entry receives the next available evaluator model. If that model fails or returns an invalid ranking, it is blacklisted for the rest of the run; affected recommendations keep their heuristic order after the blacklisted model is removed from primary, fallback, and routing candidates, promoting the next fallback when needed. If the zero-cost evaluator set is exhausted this way, ranking continues with validated paid evaluators.
-- **Concurrency ceiling**: provider probes run sequentially, and AI ranking also invokes at most one evaluator subprocess at a time.
+- **Concurrency ceiling**: AI ranking invokes at most one evaluator subprocess at a time (see [Efficient Probing Architecture & Concurrency Control](#efficient-probing-architecture--concurrency-control) for provider probe concurrency, which uses a separate bounded scheduler).
 - **Fail-open**: if both zero-cost and validated paid evaluator models fail, recommendations keep the finalization pipeline's heuristic ordering after blacklisted evaluator refs are filtered out. The CLI prints a summary of how many entries were ranked and which models were used.
 
 ### How the ranking process is exposed to the user

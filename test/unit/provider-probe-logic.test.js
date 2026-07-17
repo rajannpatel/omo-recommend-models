@@ -45,6 +45,72 @@ function createProbeFn(invocations, resultForRef = mockProbeResult) {
   };
 }
 
+function createDeferredProbeFn(resultForRef = () => ({ ok: true })) {
+  const started = [];
+  const pending = new Map();
+  const activeByProvider = new Map();
+  let activeGlobal = 0;
+  let maxGlobal = 0;
+  let maxProvider = 0;
+
+  const probeFn = async (_ctx, modelRef) => {
+    const provider = modelRef.slice(0, modelRef.indexOf("/"));
+    started.push(modelRef);
+    activeGlobal += 1;
+    activeByProvider.set(provider, (activeByProvider.get(provider) || 0) + 1);
+    maxGlobal = Math.max(maxGlobal, activeGlobal);
+    maxProvider = Math.max(maxProvider, activeByProvider.get(provider));
+    return await new Promise((resolve) => {
+      pending.set(modelRef, () => {
+        activeGlobal -= 1;
+        activeByProvider.set(provider, activeByProvider.get(provider) - 1);
+        resolve(resultForRef(modelRef));
+      });
+    });
+  };
+
+  const resolveRef = async (modelRef) => {
+    const resolve = pending.get(modelRef);
+    assert.ok(resolve, `${modelRef} should be pending`);
+    pending.delete(modelRef);
+    resolve();
+    await Promise.resolve();
+  };
+
+  const drain = async () => {
+    for (let index = 0; index < started.length; index += 1) {
+      const modelRef = started[index];
+      if (pending.has(modelRef)) await resolveRef(modelRef);
+    }
+  };
+
+  return {
+    drain,
+    maxGlobal: () => maxGlobal,
+    maxProvider: () => maxProvider,
+    pendingRefs: () => [...pending.keys()],
+    probeFn,
+    resolveRef,
+    started,
+  };
+}
+
+function cloudLookupWithFreeRefs(refs) {
+  const byId = {};
+  for (const modelRef of refs) {
+    const slash = modelRef.indexOf("/");
+    const provider = modelRef.slice(0, slash);
+    const model = modelRef.slice(slash + 1);
+    byId[provider] ??= new Map();
+    byId[provider].set(model, { cost: { input: 0, output: 0 } });
+  }
+  return { byId };
+}
+
+async function waitForSchedulerTurn() {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 function memoryPolicyCache(initialRefs = []) {
   const refs = new Set(initialRefs);
   const added = [];
@@ -111,6 +177,7 @@ test("runProviderProbes probes every eligible ref and returns ordered records", 
     };
   }));
   assert.equal(stdout, [
+    "◇  Probing 4 model(s) across AI providers...",
     "✓  model: google/gemini-string-only on provider: google is available",
     "✓  model: anthropic/claude on provider: anthropic is available",
     "✓  model: google/gemini-free on provider: google is available",
@@ -211,6 +278,163 @@ test("runProviderProbes seeds only advertised cached refs without spawning", asy
   assert.match(stdout, /google\/cached.*guardrail-policy-exclusion \(cached\)/);
   assert.doesNotMatch(stdout, /stale\/unadvertised/);
   assert.match(stdout, /2 eligible; 1 probed, 1 available, 0 failed, 1 cached, 0 skipped/);
+});
+
+test("runProviderProbes bounds async probes globally and per provider", async () => {
+  const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
+  const ctx = createProbeContext();
+  const deferred = createDeferredProbeFn();
+  const eligibleRefs = [
+    "google/one",
+    "google/two",
+    "anthropic/one",
+    "xai/one",
+    "openai/one",
+    "mistral/one",
+  ];
+
+  const probes = await runProviderProbes({
+    ctx,
+    eligibleRefs,
+    probeConcurrency: { global: 4, perProvider: 1 },
+    probeModelFn: deferred.probeFn,
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(deferred.started, [
+    "google/one",
+    "anthropic/one",
+    "xai/one",
+    "openai/one",
+  ]);
+  await deferred.drain();
+  await probes.ensureProbesAwaited();
+
+  assert.equal(deferred.maxGlobal(), 4);
+  assert.equal(deferred.maxProvider(), 1);
+  assert.deepEqual((await probes.probeRecordsPromise).map((record) => record.modelRef), eligibleRefs);
+});
+
+test("runProviderProbes runs at most one free or local probe at a time", async () => {
+  const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
+  const ctx = createProbeContext();
+  const deferred = createDeferredProbeFn();
+
+  const probes = await runProviderProbes({
+    ctx,
+    cloudLookup: cloudLookupWithFreeRefs(["google/free", "openrouter/free"]),
+    eligibleRefs: ["google/free", "openrouter/free", "anthropic/paid", "xai/paid"],
+    probeConcurrency: { global: 4, perProvider: 1, freeOrLocal: 1 },
+    probeModelFn: deferred.probeFn,
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(deferred.started, ["google/free", "anthropic/paid", "xai/paid"]);
+  assert.deepEqual(deferred.pendingRefs(), ["google/free", "anthropic/paid", "xai/paid"]);
+
+  await deferred.resolveRef("google/free");
+  await waitForSchedulerTurn();
+  assert.equal(deferred.started.includes("openrouter/free"), true);
+  await deferred.drain();
+  await probes.ensureProbesAwaited();
+});
+
+test("runProviderProbes closes exhausted provider queues without blocking other providers", async () => {
+  const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
+  const ctx = createProbeContext();
+  const deferred = createDeferredProbeFn((modelRef) =>
+    modelRef === "google/quota"
+      ? { ok: false, reason: "quota-exceeded", scope: "provider" }
+      : { ok: true });
+  const eligibleRefs = [
+    "google/quota",
+    "google/skipped-later",
+    "anthropic/ok",
+    "xai/ok",
+  ];
+
+  const probes = await runProviderProbes({
+    ctx,
+    eligibleRefs,
+    probeConcurrency: { global: 3, perProvider: 1 },
+    probeModelFn: deferred.probeFn,
+  });
+  await Promise.resolve();
+  await deferred.resolveRef("google/quota");
+  await deferred.drain();
+  await probes.ensureProbesAwaited();
+
+  assert.deepEqual(deferred.started, ["google/quota", "anthropic/ok", "xai/ok"]);
+  assert.deepEqual(
+    (await probes.probeRecordsPromise).map(({ modelRef, outcome, reason, spawned }) => ({
+      modelRef,
+      outcome,
+      reason,
+      spawned,
+    })),
+    [
+      { modelRef: "google/quota", outcome: "failed", reason: "quota-exceeded", spawned: true },
+      { modelRef: "google/skipped-later", outcome: "skipped-provider-exhausted", reason: "quota-exceeded", spawned: false },
+      { modelRef: "anthropic/ok", outcome: "available", reason: null, spawned: true },
+      { modelRef: "xai/ok", outcome: "available", reason: null, spawned: true },
+    ],
+  );
+});
+
+test("runProviderProbes invalidates late same-provider successes after provider exhaustion", async () => {
+  const { runProviderProbes } = await import("../../lib/recommend/providers/probe-orchestration.js");
+  const ctx = createProbeContext();
+  const deferred = createDeferredProbeFn((modelRef) =>
+    modelRef === "google/quota"
+      ? { ok: false, reason: "quota-exceeded", scope: "provider" }
+      : { ok: true });
+
+  const probes = await runProviderProbes({
+    ctx,
+    eligibleRefs: ["google/slow-success", "google/quota", "google/skipped-later"],
+    probeConcurrency: { global: 2, perProvider: 2 },
+    probeModelFn: deferred.probeFn,
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(deferred.started, ["google/slow-success", "google/quota"]);
+  await deferred.resolveRef("google/quota");
+  await deferred.resolveRef("google/slow-success");
+  await probes.ensureProbesAwaited();
+
+  assert.deepEqual(await probes.paidProbesPromise, []);
+  assert.deepEqual(
+    (await probes.probeRecordsPromise).map(({ modelRef, outcome, reason, source, spawned }) => ({
+      modelRef,
+      outcome,
+      reason,
+      source,
+      spawned,
+    })),
+    [
+      {
+        modelRef: "google/slow-success",
+        outcome: "failed",
+        reason: "provider-quota-exhausted",
+        source: "orchestrator",
+        spawned: true,
+      },
+      {
+        modelRef: "google/quota",
+        outcome: "failed",
+        reason: "quota-exceeded",
+        source: "probe",
+        spawned: true,
+      },
+      {
+        modelRef: "google/skipped-later",
+        outcome: "skipped-provider-exhausted",
+        reason: "quota-exceeded",
+        source: "orchestrator",
+        spawned: false,
+      },
+    ],
+  );
 });
 
 test("runProviderProbes invalidates earlier success only after strong provider exhaustion", async () => {

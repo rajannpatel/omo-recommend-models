@@ -53,9 +53,11 @@ const spawnMock = mock.fn((_command, args) => {
   }
   return (childFactories.shift() || successfulChild)();
 });
+const execFileSyncMock = mock.fn(() => "");
 
 mock.module("node:child_process", {
   namedExports: {
+    execFileSync: execFileSyncMock,
     spawn: spawnMock,
   },
 });
@@ -676,7 +678,7 @@ test("runProviderProbes prints every final record template and exact aggregate a
     "google/limited",
     "google/policy",
     "google/in-flight",
-    "anthropic/after-abort",
+    "google/after-abort",
   ];
   const results = new Map([
     ["google/limited", { ok: false, reason: "rate-limited", scope: "model" }],
@@ -691,6 +693,7 @@ test("runProviderProbes prints every final record template and exact aggregate a
     const value = await runProviderProbes({
       ctx,
       eligibleRefs,
+      probeConcurrency: { global: 1, perProvider: 1 },
       probeModelFn: async (_ctx, modelRef) => {
         if (modelRef === "google/in-flight") {
           ctx.abortController.abort();
@@ -704,12 +707,13 @@ test("runProviderProbes prints every final record template and exact aggregate a
   });
 
   assert.equal(output, [
+    "◇  Probing 6 model(s) across AI providers...",
     "✗  model: google/cached on provider: google is guardrail-policy-exclusion (cached)",
     "✓  model: google/available on provider: google is available",
     "✗  model: google/limited on provider: google is rate limited",
     "✗  model: google/policy on provider: google is guardrail-policy-exclusion",
     "✗  model: google/in-flight on provider: google is aborted",
-    "✗  model: anthropic/after-abort on provider: anthropic is aborted (not probed after interruption)",
+    "✗  model: google/after-abort on provider: google is aborted (not probed after interruption)",
     "◇  Cloud model verification complete: 6 eligible; 4 probed, 1 available, 3 failed, 1 cached, 1 skipped",
     "",
   ].join("\n"));
@@ -751,6 +755,7 @@ test("runProviderProbes reports final eligibility after strong provider exhausti
   });
 
   assert.equal(output, [
+    "◇  Probing 3 model(s) across AI providers...",
     "✗  model: google/ok-before on provider: google is provider-quota-exhausted",
     "✗  model: google/quota on provider: google is quota-exceeded",
     "✗  model: google/after-quota on provider: google is quota-exceeded (not probed after provider exhaustion)",

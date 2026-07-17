@@ -780,7 +780,10 @@ test("real CLI preserves interleaved advertised order through strong exhaustion"
 
   const result = harness.run();
 
-  assert.deepEqual(harness.invocations(), [refs[0], refs[1], refs[2], refs[4]]);
+  const invocations = harness.invocations();
+  assert.deepEqual(invocations.filter((ref) => ref.startsWith("google/")), [refs[0], refs[2]]);
+  assert.deepEqual(invocations.filter((ref) => ref.startsWith("openai/")), [refs[1], refs[4]]);
+  assert.equal(invocations.includes(refs[3]), false);
   assertProbeTranscript(
     result,
     [
