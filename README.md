@@ -208,7 +208,7 @@ Stages 1 and 2 use different `matchModel()` strategies from `lib/recommend/model
 
     The tool loads the cached OpenCode provider model list, scores models by family, release date, context length, reasoning capability, variant, provider prestige, and advertised cost, then keeps a compact candidate list for rule-chain matching.
 
-    For OpenRouter, the tool can fetch live model metadata via HTTPS (`https://openrouter.ai/api/v1/models`) to identify moderated models and filter them from cached candidates before scoring.
+    For OpenRouter, the tool efficiently excludes policy-disallowed models before any slow probe: it fetches the authenticated user-effective model allowlist (`https://openrouter.ai/api/v1/models/user`, requires `OPENROUTER_API_KEY`/`OPENROUTER_BEARER`) and drops OpenRouter refs the account cannot use; it also removes OpenRouter refs already recorded in the persisted policy-exclusion cache from a prior guardrail/policy probe failure. Both exclusions happen before `opencode models --verbose` enrichment and before any `say 1` probe, and the CLI prints how many models were excluded (or that the live allowlist was unavailable and cached exclusions were checked instead) at each step.
 * **Local inventory**
 
     If local discovery is enabled, the tool checks GPU/VRAM and Ollama, normalizes installed and cached Ollama models into candidate cards, infers each agent/category requirement, and ranks candidates by specialty, context support, estimated memory, parameter count, OpenRouter popularity when available, and installed-state tie-breaks. The fit budget is `gpu.vramGb * 0.90`; the active dynamic path does not subtract the old fixed 1.5 GB margin.
