@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import test, { mock } from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test, { mock, after } from "node:test";
+
+// Isolates these tests from the real developer machine's opencode auth.json -
+// an env object with no OPENROUTER_API_KEY must mean "no credential found
+// anywhere", not "no credential in env, but fall through to the real file".
+const noCredentialDataHome = fs.mkdtempSync(path.join(os.tmpdir(), "omo-no-openrouter-auth-"));
+function envWithNoOpenRouterCredential() {
+  return { XDG_DATA_HOME: noCredentialDataHome };
+}
+after(() => fs.rmSync(noCredentialDataHome, { recursive: true, force: true }));
 
 const accessibleOutput = ["openrouter/allowed-model", "openrouter/policy-blocked-model", ""].join("\n");
 const verboseOutput = [
@@ -56,7 +68,7 @@ test("loadProviderModels applies cached OpenRouter policy exclusions before verb
   const { output, value: cache } = await captureStdout(() => loadProviderModels({
     ctx: attachCachedPolicy(new RuntimeContext()),
     quiet: true,
-    env: {},
+    env: envWithNoOpenRouterCredential(),
   }));
 
   assert.deepEqual(cache.models.openrouter.map((model) => model.id), [
@@ -78,7 +90,7 @@ test("preparePaidProviderModels does not spawn probes for cached OpenRouter poli
   const initialCache = await captureStdout(() => loadProviderModels({
     ctx,
     quiet: true,
-    env: {},
+    env: envWithNoOpenRouterCredential(),
   })).then((result) => result.value);
   const invocations = [];
 

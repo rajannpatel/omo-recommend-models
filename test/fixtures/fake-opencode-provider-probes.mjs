@@ -61,6 +61,14 @@ switch (outcome.kind) {
   case "strong-exhaustion":
     console.error("HTTP 402 payment required: insufficient balance");
     process.exit(1);
+  case "org-member-budget":
+    console.error("Org member budget limit exceeded (monthly limit). Contact your org admin.");
+    process.exit(1);
+  case "openai-budget":
+    console.error(
+      "You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.",
+    );
+    process.exit(1);
   case "model-unavailable":
     console.error("model not found");
     process.exit(1);

@@ -382,6 +382,61 @@ test("probeModel marks only strong textual exhaustion as provider-wide without s
   assert.deepEqual([...ctx.quotaExceededProviders], []);
 });
 
+test("probeModel classifies OpenRouter org-member budget text as provider-wide quota exhaustion", async () => {
+  const exactMessage = "Org member budget limit exceeded (monthly limit). Contact your org admin.";
+  const { RuntimeContext } = await import("../../lib/runtime-context.js");
+  const { probeModel } = await import("../../lib/providers/probe.js");
+  const ctx = new RuntimeContext();
+  useChild(() => fakeChild({ code: 1, stderr: exactMessage }));
+
+  const result = await probeModel(ctx, "openrouter/org-budget");
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "quota-exceeded",
+    scope: "provider",
+    errorOutput: exactMessage,
+  });
+  assert.deepEqual([...ctx.providerAvailability.entries()], []);
+  assert.deepEqual([...ctx.quotaExceededProviders], []);
+});
+
+test("probeModel classifies OpenAI insufficient_quota text as provider-wide quota exhaustion", async () => {
+  const exactMessage =
+    "You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.";
+  const { RuntimeContext } = await import("../../lib/runtime-context.js");
+  const { probeModel } = await import("../../lib/providers/probe.js");
+  const ctx = new RuntimeContext();
+  useChild(() => fakeChild({ code: 1, stderr: exactMessage }));
+
+  const result = await probeModel(ctx, "openai/budget");
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "quota-exceeded",
+    scope: "provider",
+    errorOutput: exactMessage,
+  });
+  assert.deepEqual([...ctx.providerAvailability.entries()], []);
+  assert.deepEqual([...ctx.quotaExceededProviders], []);
+});
+
+test("probeModel classifies OpenAI insufficient_quota code as provider-wide quota exhaustion", async () => {
+  const { RuntimeContext } = await import("../../lib/runtime-context.js");
+  const { probeModel } = await import("../../lib/providers/probe.js");
+  const ctx = new RuntimeContext();
+  useChild(() => fakeChild({ code: 1, stderr: 'error type: "insufficient_quota"' }));
+
+  const result = await probeModel(ctx, "openai/budget-code");
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "quota-exceeded",
+    scope: "provider",
+    errorOutput: 'error type: "insufficient_quota"',
+  });
+});
+
 test("probeModel maps ambiguous quota text to exact-ref auth failure", async () => {
   const { RuntimeContext } = await import("../../lib/runtime-context.js");
   const { probeModel } = await import("../../lib/providers/probe.js");

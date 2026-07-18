@@ -850,6 +850,54 @@ test("real CLI preserves interleaved advertised order through strong exhaustion"
   assertHermeticProbeHarness(harness);
 });
 
+test("real CLI closes OpenRouter siblings after org-member budget exhaustion while another provider continues", (t) => {
+  const refs = [
+    "openrouter/alpha",
+    "openrouter/org-budget",
+    "openrouter/beta",
+    "openai/gpt-5.5",
+  ];
+  const harness = createProviderProbeHarness(t, {
+    entries: refs.map((ref) => ({ ref, metadata: providerMetadata(1) })),
+    outcomes: { [refs[1]]: { kind: "org-member-budget" } },
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const lines = probeResultLines(result.stdout);
+  assert.ok(lines.includes(`✗  model: ${refs[1]} on provider: openrouter is quota-exceeded`));
+  assertRacedProviderExhaustion(lines, refs[0], "openrouter");
+  assertRacedProviderExhaustion(lines, refs[2], "openrouter");
+  assert.ok(lines.includes(`✓  model: ${refs[3]} on provider: openai is available`));
+  assertRecommendationRefs(result.stdout, [refs[3]]);
+  assertHermeticProbeHarness(harness);
+});
+
+test("real CLI closes OpenAI siblings after insufficient_quota exhaustion while another provider continues", (t) => {
+  const refs = [
+    "openai/alpha",
+    "openai/budget",
+    "openai/beta",
+    "anthropic/claude-3.5-sonnet",
+  ];
+  const harness = createProviderProbeHarness(t, {
+    entries: refs.map((ref) => ({ ref, metadata: providerMetadata(1) })),
+    outcomes: { [refs[1]]: { kind: "openai-budget" } },
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const lines = probeResultLines(result.stdout);
+  assert.ok(lines.includes(`✗  model: ${refs[1]} on provider: openai is quota-exceeded`));
+  assertRacedProviderExhaustion(lines, refs[0], "openai");
+  assertRacedProviderExhaustion(lines, refs[2], "openai");
+  assert.ok(lines.includes(`✓  model: ${refs[3]} on provider: anthropic is available`));
+  assertRecommendationRefs(result.stdout, [refs[3]]);
+  assertHermeticProbeHarness(harness);
+});
+
 test("real CLI cache skips only advertised exact refs and flushes before same-run reprobe", (t) => {
   const refs = ["google/policy", "google/gemini-3.1-pro"];
   const staleRef = "stale-provider/unadvertised";

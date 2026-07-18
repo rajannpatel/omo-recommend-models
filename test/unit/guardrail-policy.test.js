@@ -234,6 +234,7 @@ process.exit(2);
 });
 
 test("isTrueQuotaExhaustion accepts only strong textual provider-wide evidence", () => {
+  const exactMessage = "Org member budget limit exceeded (monthly limit). Contact your org admin.";
   const providerWide = [
     "HTTP 402",
     "upstream returned HTTP/1.1 402 Payment Required",
@@ -248,6 +249,9 @@ test("isTrueQuotaExhaustion accepts only strong textual provider-wide evidence",
     "credits expired",
     "credit expired",
     "budget exhausted",
+    exactMessage,
+    "You exceeded your current quota, please check your plan and billing details.",
+    'type: "insufficient_quota"',
   ];
   for (const text of providerWide) {
     assert.equal(isTrueQuotaExhaustion(null, text), true, text);
